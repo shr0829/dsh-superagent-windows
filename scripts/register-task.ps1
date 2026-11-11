@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
     用计划任务替代上游的 tmux 常驻 + 每小时巡检：登录时拉起，之后每 N 分钟跑一次 watchdog。

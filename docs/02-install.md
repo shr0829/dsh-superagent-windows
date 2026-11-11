@@ -45,6 +45,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build.ps1
 3. `pnpm install --frozen-lockfile`（无 pnpm 时 `npx --yes pnpm@11.7.0 install --frozen-lockfile`）；
 4. `pnpm build`（tsdown），然后确认 `upstream\lib\index.js` 与 `upstream\cordis.patch.yml` 存在。
 
+两点行为说明：
+
+- **fetch 失败不等于构建失败。** 第 2 步的 `git fetch` 只是为了让新 pin 的 commit 可达。断网或网络抖动时，
+  脚本会用 `git cat-file -e <commit>^{commit}` 判断这个 commit 是否已在本地副本里；在就降级成警告继续构建，
+  不在才报错退出。所以改完 `vendor\upstream.lock.json` 之后第一次构建仍然需要联网。
+- **stderr 里有输出不是错误。** pnpm 与 tsdown 会往 stderr 写进度和建议（例如「建议用 ESM 格式」）。
+  脚本默认 `$ErrorActionPreference = 'Stop'`，合并 `2>&1` 时这些行会变成 `ErrorRecord` 把脚本直接终止，
+  看起来像构建失败。`build.ps1` 只在发起 pnpm 的那一段把错误偏好放宽，成败仍由退出码判定。
+
 产物不提交进仓库：`upstream/` 在 `.gitignore` 里。换机器、清目录之后重跑一次即可复现同一个 commit。
 
 ## 2. 建独立 profile

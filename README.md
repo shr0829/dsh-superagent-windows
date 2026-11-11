@@ -56,6 +56,7 @@ scripts\
   unregister-task.ps1   删除计划任务
   new-agent-cli.ps1     生成 gh-agent.cmd / lark-bot.cmd 凭据包装器
   test-scripts.ps1      自检：BOM、语法、语法树引用的文件是否存在
+  fix-encoding.ps1      编辑器丢 BOM 之后补回来（统一成 UTF-8 with BOM + CRLF）
   lib\common.ps1        共用：UTF-8 无 BOM 读写、免代理 HTTP GET、版本号解析
 config\
   profile.cordis.patch.yml   机器配置样板（带注释）
@@ -75,7 +76,9 @@ docs\
 **1. `.ps1` 文件必须带 UTF-8 BOM。** Windows PowerShell 5.1 读无 BOM 的文件时按系统 ANSI 代码页解码，
 脚本里的中文注释会被拆成半个字符，把后面的引号和换行吃掉，报出一堆莫名其妙的语法错误。
 本机 `pwsh` 工具实际就是 5.1，所以这不是理论问题。仓库里所有 `.ps1` 都带 BOM，`scripts\test-scripts.ps1` 会检查；
-编辑器保存时不要勾掉 BOM。
+编辑器保存时不要勾掉 BOM，丢了就跑 `scripts\fix-encoding.ps1` 补回来。
+一个容易踩的细节：`Encoding.GetBytes` 不产生 BOM，写 BOM 必须把 `GetPreamble()` 的字节拼到内容前面，
+只 `WriteAllBytes(GetBytes($text))` 写出来的文件看起来"正常"、实际仍然没有 BOM。
 
 **2. 脚本要能在 Windows PowerShell 5.1 上跑。** 目标机器是 stock Windows，不该为了跑一个控制脚本先装 PowerShell 7。
 所以：不用 `??`、`-AsHashtable`、三元运算符，不用 `-Encoding utf8NoBOM`，
@@ -92,7 +95,9 @@ HTTP 用 `HttpWebRequest` 而不是 `Invoke-RestMethod -NoProxy`（5.1 没有这
 - `doctor.ps1` 14 项检查全部按预期给出 PASS/WARN（`dsh 0.2.2-rc.1`、Node 24.18、git 2.56）；
 - `dsh-superagent.ps1 status` 在没有服务时输出完整 JSON 并以 1 退出，`logs` 以 0 退出；
 - 所有脚本通过 5.1 语法树解析（`scripts\test-scripts.ps1`）；
-- `build.ps1` 能从锁定 commit 构建出 `upstream\lib\index.js`。
+- `build.ps1` 能从锁定 commit 完整跑通：clone → `npx pnpm@11.7.0 install --frozen-lockfile`（234 个包）→ `tsdown`
+  产出 `upstream\lib\index.js`（450.26 kB）与 `lib\client.js`（359.28 kB），退出码 0；
+  断网时只要本地已有该 commit，fetch 失败会退化成警告而不是中断构建。
 
 尚未在本机跑通的（`docs\01-windows-deltas.md` 末尾有完整清单）：真实 GitHub Issue → Ticket 的端到端链路、
 计划任务在锁屏/睡眠跨过触发点后的补跑行为、飞书 Source（未装 `lark-cli`）。

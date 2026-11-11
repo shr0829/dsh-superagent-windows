@@ -12,7 +12,10 @@
 ## 硬约束
 
 1. **`.ps1` 必须带 UTF-8 BOM。** 5.1 读无 BOM 文件按 ANSI 解码，中文注释会吃掉后面的引号与换行，
-   报出一串与真实原因无关的语法错误。改动任何 `.ps1` 后跑 `scripts/test-scripts.ps1` 复核。
+   报出一串与真实原因无关的语法错误。改动任何 `.ps1` 后跑 `scripts/test-scripts.ps1` 复核；
+   编辑器保存时丢了 BOM 就跑 `scripts/fix-encoding.ps1` 补回来，不要手工加。
+   `Encoding.GetBytes` **不产生** BOM，写 BOM 必须把 `GetPreamble()` 的字节拼到内容前面——
+   只 `WriteAllBytes(GetBytes($text))` 得到的文件仍然没有 BOM。
 2. **只用 5.1 有的语法与参数。** 禁止 `??`、`?:`、`-AsHashtable`、`-Encoding utf8NoBOM`、`Invoke-RestMethod -NoProxy`。
    文件读写走 `common.ps1` 的 `Read-Utf8Text` / `Write-Utf8Text`；HTTP 走 `Invoke-JsonGet`。
 3. **不复制上游源码。** `upstream/` 是构建产物，被 `.gitignore` 忽略；上游版本只由 `vendor/upstream.lock.json` 决定。
@@ -27,6 +30,7 @@
 ## 改完必须做的验证
 
 ```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\fix-encoding.ps1 -Check   # BOM + CRLF，只查不写
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test-scripts.ps1   # BOM + 语法 + 点源引用
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\doctor.ps1          # 14 项环境体检
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dsh-superagent.ps1 status

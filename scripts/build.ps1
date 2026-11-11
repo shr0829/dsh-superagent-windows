@@ -62,8 +62,19 @@ if (-not (Test-Path -LiteralPath (Join-Path $Destination '.git'))) {
 Push-Location $Destination
 try {
     Write-Output "checking out $Ref"
-    & git fetch --tags --force origin
-    Assert-ExitCode 'git fetch'
+    # fetch 只是为了让新 pin 的 commit 可达；已经有本地副本时断网也要能构建。
+    # 所以 fetch 失败不直接失败，能证明该 commit 已在库里就继续。
+    $ErrorActionPreference = 'Continue'
+    & git fetch --tags --force origin 2>&1 | ForEach-Object { Write-Output $_ }
+    $fetchCode = $LASTEXITCODE
+    $ErrorActionPreference = 'Stop'
+    if ($fetchCode -ne 0) {
+        & git cat-file -e "$Ref^{commit}" 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            throw "git fetch failed (exit $fetchCode) and $Ref is not in the local clone"
+        }
+        Write-Output "warning: git fetch failed (exit $fetchCode), using the commit already in the local clone"
+    }
     & git checkout --force --detach $Ref
     Assert-ExitCode "git checkout $Ref"
     $head = ((& git rev-parse HEAD) -join '').Trim()
@@ -88,7 +99,17 @@ try {
 
     function Invoke-Pnpm {
         param([string[]]$Arguments)
-        & $pnpmExe @pnpmPrefix @Arguments 2>&1 | ForEach-Object { Write-Output $_ }
+        # pnpm 会把进度提示与警告写到 stderr（例如 tsdown 的 CJS 格式建议）。
+        # 本脚本默认 $ErrorActionPreference = 'Stop'，合并 2>&1 之后这些行会变成
+        # ErrorRecord 把脚本直接终止，看起来像构建失败、其实只是警告。
+        # 只在这一个调用范围内放宽，成功与否仍由退出码决定。
+        $previous = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            & $pnpmExe @pnpmPrefix @Arguments 2>&1 | ForEach-Object { Write-Output $_ }
+        } finally {
+            $ErrorActionPreference = $previous
+        }
         Assert-ExitCode "pnpm $($Arguments -join ' ')"
     }
 
