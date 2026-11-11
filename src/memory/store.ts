@@ -89,8 +89,8 @@ export class Memory {
     const record = memoryRecord({
       title: draft.title?.trim() || records.map(item => item.title).join(' / ').slice(0, 200),
       text: body, kind: draft.kind ?? records[0]!.kind,
-      tags: draft.tags ?? records.flatMap(item => item.tags),
-      next: draft.next ?? records.flatMap(item => item.next).filter(ref => !records.some(item => `memory/${item.id}` === ref)),
+      tags: draft.tags ?? records.flatMap(item => item.tags ?? []),
+      next: (draft.next ?? records.flatMap(item => item.next ?? [])).filter(ref => !records.some(item => `memory/${item.id}` === ref)),
       supersedes: records.map(item => item.id),
       ...records[0]!.source ? { source: records[0]!.source } : {}, ...records[0]!.thread ? { thread: records[0]!.thread } : {},
       ...records[0]!.ticketId ? { ticketId: records[0]!.ticketId } : {},
