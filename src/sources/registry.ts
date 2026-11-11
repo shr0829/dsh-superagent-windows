@@ -90,12 +90,16 @@ export class SourceRegistry implements SourceScope {
   }
   /**
    * Sends a message idempotently through its Channel's kind; returns `'waiting'` while the kind is not installed, or
-   * `'gone'` when the target (or a kind without channels) can never receive it.
+   * `'gone'` when the target (or a kind without channels) can never receive it. `deliver` is what a kind that answers inside
+   * DSH itself (the chat channel) uses to put the message back into a Session.
    */
-  async send(message: OutboundMessage, commands: Commands): Promise<'sent' | 'gone' | 'waiting'> {
+  async send(message: OutboundMessage, commands: Commands,
+    deliver: (session: string, requestId: string, text: string, mode: 'queue' | 'steer' | { inject: string }) => Promise<'sent' | 'gone'>
+      = async () => 'gone')
+    : Promise<'sent' | 'gone' | 'waiting'> {
     const kind = this.kinds.get(message.channel.source)
     if (!kind) return 'waiting'
-    return kind.channel ? kind.channel.send({ commands }, message) : 'gone'
+    return kind.channel ? kind.channel.send({ commands, deliver }, message) : 'gone'
   }
   link(channel: ChannelRef, links: ChannelLinks): ChannelLink {
     const link = this.kinds.get(channel.source)?.channel?.link(channel.address, links)

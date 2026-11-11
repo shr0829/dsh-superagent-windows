@@ -66,6 +66,12 @@ export interface Executor {
   deliver(ticket: Ticket, assignment: Assignment): void
   /** End an assignment's work, such as cancelling its Session's turn; called after the ticket or assignment has already ended in the domain. */
   stop(ticket: Ticket, assignment: Assignment, reason: string): void
+  // [fork] 上游只有「结束派工」，没有「人接管」这一档：取消当前回合但保留 Session、执行目录、inbox、派工与工单本身。
+  /**
+   * Interrupt the turn a running assignment's worker is in while the assignment goes on: a person takes the work over, and
+   * what the Session holds, such as its inbox, stays. Reports nothing back, since the ticket keeps the assignment.
+   */
+  interrupt(ticket: Ticket, assignment: Assignment): void
 }
 
 /** A message for a Channel; `ticketId` names the Ticket it is for, when there is one. */

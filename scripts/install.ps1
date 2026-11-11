@@ -149,11 +149,25 @@ if ($append.Count -gt 0) {
         Copy-Item -LiteralPath $profilePatch -Destination $backup -Force
         Write-Output "backed up existing patch -> $backup"
     }
-    $body = ($patchText.TrimEnd() + "`r`n" + ($append -join "`r`n") + "`r`n")
+    $entries = $append -join "`r`n"
+    # 模板给出的 patch 只有注释和一个空数组 `[]`。把条目追在 `[]` 后面会得到「数组 + 序列」的文档，
+    # YAML 解析直接失败，服务起不来；所以空数组时是替换掉那行，不是追加。
+    if ($patchText -match '(?m)^\s*\[\]\s*$') {
+        $body = ($patchText -replace '(?m)^\s*\[\][ \t]*(\r?\n)?', '') + $entries + "`r`n"
+    } else {
+        $body = ($patchText.TrimEnd() + "`r`n" + $entries + "`r`n")
+    }
     Write-Utf8Text -Path $profilePatch -Text $body
     Write-Output "wrote $profilePatch"
 } else {
-    Write-Output "patch already carries webserver + stateDir: $profilePatch"
+    # 早先的追加把 `[]` 留在了条目上方；这种文档解析不了，就地修掉。
+    if (($patchText -match '(?m)^\s*\[\]\s*$') -and ($patchText -match '(?m)^\s*-\s+id:\s*')) {
+        $body = ($patchText -replace '(?m)^\s*\[\][ \t]*(\r?\n)?', '')
+        Write-Utf8Text -Path $profilePatch -Text $body
+        Write-Output "removed a stray [] above the existing entries of $profilePatch"
+    } else {
+        Write-Output "patch already carries webserver + stateDir: $profilePatch"
+    }
 }
 
 # ---------------------------------------------------------------- 5. 账号包装器

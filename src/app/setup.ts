@@ -16,6 +16,13 @@ export interface SetupHost {
 const setupFields = (settings: Settings) =>
   JSON.stringify(Object.entries(SETUP_FIELDS).map(([id, keys]) => keys.map(key => settings.sources[id]?.config[key] ?? '')))
 export const setupChanged = (before: Settings, after: Settings): boolean => setupFields(before) !== setupFields(after)
+/**
+ * `[fork]` Whether a Source was switched on or off. A Source that is off needs no account, so the deployment resolved so
+ * far no longer applies and setup runs again; the switches themselves stay available to a tool, which may only not change
+ * the accounts (`setupChanged` guards those).
+ */
+export const setupRestart = (before: Settings, after: Settings): boolean =>
+  setupChanged(before, after) || Object.keys(SETUP_FIELDS).some(id => (before.sources[id]?.enabled !== false) !== (after.sources[id]?.enabled !== false))
 
 /**
  * Resolves the target repository, GitHub account, and optional Feishu bot by probing CLIs, then writes and applies the isolated git and shim environment used by worker processes.
@@ -60,6 +67,9 @@ export class Setup {
   /** Verify account CLIs for a modified source block before saving, ignoring setup errors belonging to other blocks. */
   async checkAccounts(block: SettingsBlock, settings: Settings): Promise<void> {
     const { machine } = this.host
+    // `[fork]` A Source that is off needs no account: a chat-only installation clears the GitHub repository and CLI, and
+    // saving that block must not be refused by the check those values would have to pass while the Source is on.
+    if (block === 'source:github' && settings.sources.github?.enabled === false) return
     const check = block === 'source:feishu' ? resolveFeishuBot(machine, settings.sources.feishu?.config, this.probe())
       : resolveDeployment(machine, settings.sources.github?.config, this.probe())
     await check.catch((error: unknown) => { if (!(error instanceof SetupError) || error.place === block.slice(7)) throw error })
@@ -76,7 +86,12 @@ export class Setup {
   private async resolve(settings: Settings): Promise<Deployment> {
     const { context, machine, lifetime } = this.host
     const probe = this.probe()
-    const deployment = await resolveDeployment(machine, settings.sources.github?.config, probe)
+    // `[fork]` Resolve the GitHub account only when the GitHub Source is on. A chat-only installation has no repository and
+    // no account, and used to sit in `setupPending` forever, judging nothing; its tickets work in the Execution directory.
+    const github = settings.sources.github
+    const deployment = github && github.enabled !== false
+      ? await resolveDeployment(machine, github.config, probe)
+      : { ...machine }
     const feishu = await resolveFeishuBot(machine, settings.sources.feishu?.config, probe).catch((error: unknown) => {
       if (!(error instanceof SetupError)) throw error
       this.feishuProblem = error.problem

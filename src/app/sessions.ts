@@ -66,6 +66,11 @@ const NO_WAIT = 'Reports, follow_up notices, new candidates and a background job
 /** What a main Session under `standard` is told when its command would wait the shell's default. */
 const DEFAULT_WAIT = 'This shell waits up to 60 seconds by default: pass timeoutMs of at most 30000, or run_in_background, '
   + 'as a waiting step holds back new candidates.'
+/**
+ * [fork] What the main Session keeps: its own reads, jobs, skills and the shell. `bash` and `pwsh` are both named because the
+ * profile only registers one of them — Windows ships `pwsh` — and `tools.restrict()` refuses a name the profile does not have.
+ */
+const MAIN_TOOLS = ['skill', 'bash', 'pwsh', 'read', 'read_image', 'job_output', 'job_list', 'job_kill']
 /** `sleep` at a command position: the start, after ; & | ( { ! ` or a newline, or after a keyword or a command that runs it. */
 const SLEEP = /(?:^|[;&|({!`\n]|\b(?:do|then|else|elif|if|while|until|time|exec|nohup|command|env)\s)\s*(?:\S*\/)?sleep\b/
 /**
@@ -76,7 +81,7 @@ const SLEEP = /(?:^|[;&|({!`\n]|\b(?:do|then|else|elif|if|while|until|time|exec|
  */
 function noWait({ name, arguments: input }: { name: string; arguments: unknown }, routed: () => boolean): string | undefined {
   const args = (input ?? {}) as { command?: unknown; timeoutMs?: unknown; run_in_background?: unknown; wait?: unknown; timeout_ms?: unknown }
-  if (name === 'bash') {
+  if (name === 'bash' || name === 'pwsh') {
     const sleeps = typeof args.command === 'string' && SLEEP.test(args.command)
     if (sleeps || typeof args.timeoutMs === 'number' && args.timeoutMs > 30_000) return NO_WAIT
     if (args.timeoutMs === undefined && args.run_in_background !== true && !routed()) return DEFAULT_WAIT
@@ -139,9 +144,10 @@ export class Sessions {
     const ctx = this.ctx
     let result = await ctx.sessionController.resolveAgent(id as SessionId)
     if ('error' in result && result.error.code === 'session/not-found') {
-      const workspace = await ctx.workspaceRegistry.create(cwd)
+      // [fork] A Session is created at its own directory and joins no Workspace: a Workspace per ticket, and one for the
+      // main Session, put an entry in DSH's workspace list for every ticket. The Orchestrator panel already shows them.
       // A Session keeps the preset it was created with, one of the bundle's own (cordis.patch.yml).
-      await ctx.sessionController.create({ sessionId: id as SessionId, workspaceId: workspace.id,
+      await ctx.sessionController.create({ sessionId: id as SessionId, cwd,
         agentPreset: role === 'worker' ? WORKER_PRESET : ROUTER_PRESET })
       result = await ctx.sessionController.resolveAgent(id as SessionId)
     }
@@ -153,10 +159,22 @@ export class Sessions {
     await ctx.sessionController.rename({ sessionId: id as SessionId, title })
     return result.agent
   }
+  /** Whether `sessionId` is one this orchestrator owns — its main Session or a ticket's worker Session — rather than a person's. */
+  owns(sessionId: string): boolean { return sessionId === this.host.masterId || ticketOfSession(sessionId) !== undefined }
   /** Returns whether `sessionId` already holds the message delivered under `requestId`, or `false` if the session does not exist. */
   async holds(sessionId: string, requestId: string): Promise<boolean> {
     const result = await this.ctx.sessionController.resolveAgent(sessionId as SessionId)
     return !('error' in result) && await this.agentDelivery.holds(result.agent, key(requestId))
+  }
+  /**
+   * Delivers a message into a Session at most once per `requestId`, the way `prompt` does, and reports `'gone'` instead of
+   * throwing when no such Session exists: a Source writing back to a conversation may find that its person closed it.
+   */
+  async deliver(sessionId: string, requestId: string, text: string, mode: 'queue' | 'steer' | { inject: string }): Promise<'sent' | 'gone'> {
+    const result = await this.ctx.sessionController.resolveAgent(sessionId as SessionId)
+    if ('error' in result) return 'gone'
+    await this.agentDelivery.send(result.agent, key(requestId), text, mode, this.host.lifetime)
+    return 'sent'
   }
   /** Deliver a message once per request id: to the next turn, the current one, or `inject`ed with its label without waking the agent. */
   async prompt(sessionId: string, requestId: string, text: string, mode: 'queue' | 'steer' | { inject: string }, authorize?: () => void,
@@ -260,7 +278,7 @@ export class Sessions {
     const register = this.registerTool(agent, binding)
     for (const tool of host.tools(agent, ticket)) register(tool.name, tool.description, tool.schema, tool.execute)
     if (master) {
-      binding.disposers.push(agent.ctx.tools.restrict({ allow: ['skill', 'bash', 'read', 'read_image', 'job_output', 'job_list', 'job_kill'] }),
+      binding.disposers.push(agent.ctx.tools.restrict({ allow: MAIN_TOOLS.filter(name => agent.ctx.tools.get(name, scopeParentOf(agent))) }),
         agent.ctx.tools.guard(execution => noWait(execution, () => this.routed(agent))))
     } else {
       // An Executor Session keeps the profile's work tools it has, which DSH requires to be known; its own tools are not masked.

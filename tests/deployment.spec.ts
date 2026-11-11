@@ -1,10 +1,12 @@
 import { execFile } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, isAbsolute, join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Config, executable, machineOf, resolveDeployment, resolveFeishuBot, type Machine, type Probe } from '../src/deployment.ts'
+import { Setup, setupChanged, setupRestart } from '../src/app/setup.ts'
+import { SettingsSchema, type Settings } from '../src/policy.ts'
 import { gitEnv } from './fixtures/git.ts'
 
 const exec = promisify(execFile)
@@ -18,19 +20,36 @@ const lark = (status: object, mode = 'bot', bot: object = { bot: { open_id: 'ou_
   `case "$*" in\n  "auth status") echo '${JSON.stringify(status)}' ;;\n  "config strict-mode") echo 'strict-mode: ${mode} (source: profile)' ;;\n  "api GET /open-apis/bot/v3/info --as bot --format ndjson") echo '${JSON.stringify(bot)}' ;;\nesac`
 const minimal = (overrides: Record<string, unknown> = {}) => ({ stateDir: join(dir, 'state'), ...overrides })
 const machine = (overrides: Partial<Machine> = {}): Machine => ({ ...machineOf(Config(minimal())), ...overrides })
+/** A POSIX shell for the `#!/bin/sh` stand-ins: Windows cannot execute one, but Git for Windows ships a shell that can. */
+const shell = ['C:\\Program Files\\Git\\usr\\bin\\bash.exe', 'C:\\Program Files\\Git\\bin\\bash.exe'].find(file => existsSync(file))
+const scripted = (file: string): boolean => { try { return readFileSync(file, 'utf8').startsWith('#!') } catch { return false } }
+/** A directory link: a junction needs no privilege on Windows, where a directory symlink does. */
+const linkDirectory = (target: string, link: string): void => { symlinkSync(target, link, process.platform === 'win32' ? 'junction' : 'dir') }
 /** Runs commands like worker shells do, but locally: the stand-ins first on PATH, then the system's git. */
-const probe: Probe = async argv => (await exec(argv[0]!, argv.slice(1), { env: { PATH: path, HOME: dir } })).stdout
+const probe: Probe = async argv => {
+  // The deployment code hands a command its environment as `env NAME=value command …`; `env` is not a Windows program.
+  let args = [...argv]
+  const extra: Record<string, string> = {}
+  if (args[0] === 'env') {
+    args = args.slice(1)
+    while (/^[A-Za-z_][A-Za-z0-9_]*=/.test(args[0] ?? '')) { const [name, ...value] = args.shift()!.split('='); extra[name!] = value.join('=') }
+  }
+  const program = isAbsolute(args[0]!) ? args[0]! : path.split(delimiter).map(dir => join(dir, args[0]!)).find(file => existsSync(file)) ?? args[0]!
+  const env = { ...process.env, PATH: path, HOME: dir, ...extra }
+  const [file, rest] = scripted(program) && shell ? [shell, [program.replace(/\\/g, '/'), ...args.slice(1)]] : [program, args.slice(1)]
+  return (await exec(file, rest, { env })).stdout
+}
 const setupError = (place: string, code: string, values: Record<string, unknown> = {}) => expect.objectContaining({ place, code, values: expect.objectContaining(values) })
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'deployment-'))
   mkdirSync(join(dir, 'bin')); mkdirSync(join(dir, 'state', 'worker-bin'), { recursive: true }); mkdirSync(join(dir, 'widgets', 'src'), { recursive: true })
-  path = [join(dir, 'state-link', 'worker-bin'), `${join(dir, 'state', 'worker-bin')}/`, join(dir, 'bin'), '/usr/bin', '/bin'].join(':')
+  path = [join(dir, 'state-link', 'worker-bin'), `${join(dir, 'state', 'worker-bin')}/`, join(dir, 'bin'), '/usr/bin', '/bin'].join(delimiter)
   gh(join(dir, 'bin', 'gh'), 'Agent-Bot')
   program(join(dir, 'bin', 'lark-cli'), lark({ appId: 'cli_bot', brand: 'lark', identities: { bot: { status: 'ready' } } }))
   // Stale worker shims with the same binary name must be skipped regardless of PATH normalization or symlinks.
   program(join(dir, 'state', 'worker-bin', 'gh'))
-  symlinkSync(join(dir, 'state'), join(dir, 'state-link'))
+  linkDirectory(join(dir, 'state'), join(dir, 'state-link'))
   await exec('git', ['init', '-q', join(dir, 'widgets')], { env: gitEnv() })
   await exec('git', ['-C', join(dir, 'widgets'), 'remote', 'add', 'origin', 'git@github.com:acme/widgets.git'], { env: gitEnv() })
 })
@@ -97,5 +116,26 @@ describe('setup', () => {
     await refuses('feishuNoBot')
     program(join(dir, 'bin', 'lark-cli'), 'echo "not configured" >&2; exit 1')
     await refuses('feishuCliFailed', { output: expect.stringContaining('not configured') })
+  })
+})
+
+// `[fork]` A Source that is off needs no account: a chat-only installation keeps no GitHub repository, and switching the
+// Source off must restart setup rather than keep the deployment resolved while it was on.
+describe('a Source that is off', () => {
+  const configured = (github?: { enabled: boolean; config: Record<string, unknown> }): Settings =>
+    SettingsSchema.parse(github ? { sources: { github } } : {})
+  const off = { enabled: false, config: { repository: '', cli: '' } }
+  it('runs setup again when the GitHub Source is switched, while its accounts stay a panel-only change', () => {
+    const config = { repository: 'acme/widgets', cli: 'gh' }
+    expect(setupRestart(configured({ enabled: true, config }), configured({ enabled: false, config }))).toBe(true)
+    expect(setupRestart(configured(undefined), configured(off))).toBe(true)
+    expect(setupRestart(configured({ enabled: true, config }), configured({ enabled: true, config }))).toBe(false)
+    // Switching the Source stays a change a tool may make: only the account fields are the panel's.
+    expect(setupChanged(configured({ enabled: true, config }), configured({ enabled: false, config }))).toBe(false)
+  })
+  it('checks no GitHub account for a GitHub Source that is off, so its repository can be cleared', async () => {
+    // The check must not reach a CLI: this host has no subprocess service to run one.
+    const setup = new Setup({ context: {} as never, machine: machine(), lifetime: new AbortController().signal, restart: () => {} })
+    await expect(setup.checkAccounts('source:github', configured(off))).resolves.toBeUndefined()
   })
 })

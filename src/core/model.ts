@@ -319,6 +319,13 @@ export const liveTicket = (ticket: Pick<Ticket, 'ended'>): boolean => !ticket.en
 /** How a ticket ended. */
 export const ticketOutcome = (ticket: Pick<Ticket, 'ended'>): TicketOutcome | undefined => ticket.ended?.outcome
 export const runningAssignment = (ticket: Ticket): Assignment | undefined => ticket.assignments.find(assignment => assignment.state === 'running')
+// [fork] 「此刻有回合在跑」在 domain 里只可由 startedAt / deliveredAt / idleAt 推出，供人接管时判断有没有可中断的东西。
+/**
+ * Whether a running Assignment's worker has a turn now: it started, and no turn end came after what last reached it. A worker
+ * that ended its turn and takes nothing new runs none, and there is nothing for a person to take over.
+ */
+export const turnRuns = (assignment: Assignment): boolean => !!assignment.startedAt
+  && !(assignment.idleAt && assignment.idleAt >= (assignment.deliveredAt ?? assignment.startedAt))
 /**
  * Whether a Trigger reached a ticket: it started the ticket, came to it as an Input, or is on a Thread the ticket subscribes
  * to; with `context` false, not a Thread the ticket follows only for context, where its worker may read but not write.

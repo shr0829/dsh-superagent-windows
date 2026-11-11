@@ -6,6 +6,9 @@
       name: dsh-superagent
     - id: dsh-superagent-github
       name: dsh-superagent/github-watch
+    # The chat channel: a person's message in any DSH Session is a request, and the answer comes back to that Session.
+    - id: dsh-superagent-chat
+      name: dsh-superagent/chat-watch
     # Optional Feishu Source; requires configuring a bot CLI after enabling.
     - id: dsh-superagent-feishu
       name: dsh-superagent/feishu-watch

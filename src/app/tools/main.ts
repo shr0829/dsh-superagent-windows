@@ -155,7 +155,7 @@ function routeTool(host: MainToolsHost): Tool {
 export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
   const resources: MainResourceHost = { ...host.resources, sessions: host.sessions, settings: host.settings }
   return [
-    readTool('Read one page of a resource the resource parameter lists, such as the ticket list or a ticket. Follow next_offset, and next_resource where a page names one.',
+    readTool('Read one page of a resource the resource parameter lists, such as the ticket list or a ticket. Follow next_offset, and next_resource where a page names one. A projection also lists links, the resources of the objects it stands for: expand along the link whose target the answer needs, one hop at a time, rather than reading a whole subtree.',
       false, (resource, offset, limit, signal) => readResource(resources, resource, offset, limit, undefined, signal)),
     routeTool(host),
     tool({
@@ -171,6 +171,16 @@ export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
       execute: async args => {
         const reason = host.engine.requestStatus(args.ticket_id) ? 'Asked the worker for a status report' : 'The worker is not waiting; nothing was sent'
         return routed(host, { reason, ticketId: args.ticket_id })
+      },
+    }),
+    // [fork] 上游没有接管的产品面：worker 输入走 steer，但人在后台执行中随时停下当前回合的入口缺一个工具。
+    tool({
+      name: 'orchestrator_ticket_interrupt',
+      description: 'Interrupt the turn a ticket\'s worker is in, when a person takes the work over: the assignment, its session, its directory and its inbox go on, the worker waits for what the person sends next, and the ticket records the takeover.',
+      schema: z.object({ ticket_id: z.string() }).strict(),
+      execute: async args => {
+        host.engine.interruptTicket(args.ticket_id)
+        return routed(host, { reason: 'Interrupted the turn the worker was in; the assignment goes on', ticketId: args.ticket_id })
       },
     }),
     tool({

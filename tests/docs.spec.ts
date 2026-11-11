@@ -13,13 +13,20 @@ function links(file: string): string[] {
   return [...readFileSync(file, 'utf8').matchAll(/\]\(([^)\s]+)\)/g)].map(match => match[1]!.split('#')[0]!).filter(target => target && !/^[a-z]+:/.test(target))
 }
 const files = (directory: string): string[] => readdirSync(join(ROOT, directory), { recursive: true, withFileTypes: true })
-  .filter(entry => entry.isFile()).map(entry => relative(ROOT, join(entry.parentPath, entry.name)))
+  .filter(entry => entry.isFile()).map(entry => relative(ROOT, join(entry.parentPath, entry.name)).split('\\').join('/'))
 /**
- * Extract repo-relative file paths from the first column of a table under `## <heading>` in `docs/007-architecture.md`.
- * Bare filenames inherit the directory of the preceding path in the same cell.
+ * The upstream architecture document. This repository numbers its own documents in two digits and keeps no 007 at the
+ * top level, so the upstream document is vendored under `docs/upstream/`, where the document list and the numbering
+ * test above do not read it.
+ */
+const ARCHITECTURE = ['docs/007-architecture.md', 'docs/upstream/007-architecture.md'].find(path => existsSync(join(ROOT, path)))
+/**
+ * Extract repo-relative file paths from the first column of a table under `## <heading>` in the architecture document.
+ * Bare filenames inherit the directory of the preceding path in the same cell. Paths come back with `/`, as the
+ * document writes them, so they compare with `files()` whatever separator `relative` uses on this platform.
  */
 function listed(heading: string): string[] {
-  const lines = read('docs/007-architecture.md').split('\n')
+  const lines = read(ARCHITECTURE!).replaceAll('\r\n', '\n').split('\n')
   const start = lines.indexOf(`## ${heading}`)
   const end = lines.findIndex((line, index) => index > start && line.startsWith('## '))
   // The first two rows are the header and its separator.
@@ -31,7 +38,7 @@ function listed(heading: string): string[] {
       directory = dirname(name!)
       return name!
     })
-  })
+  }).map(target => target.split('\\').join('/'))
 }
 
 describe('documentation', () => {
@@ -55,12 +62,13 @@ describe('documentation', () => {
   it('leaves no merge conflict markers in any document', () => {
     expect(documents.filter(path => /^(<{7}|>{7}) /m.test(read(path)))).toEqual([])
   })
-  it('lists every module of src in the module table of 007 Architecture, and only files that exist', () => {
+  // Skipped only when neither copy of the upstream document is in the repository: the tables have nothing to be checked against then.
+  it.skipIf(!ARCHITECTURE)('lists every module of src in the module table of 007 Architecture, and only files that exist', () => {
     const modules = listed('Modules')
     expect(files('src').filter(path => !modules.includes(path))).toEqual([])
     expect(modules.filter(path => !existsSync(join(ROOT, path)))).toEqual([])
   })
-  it('lists every test in the test table of 007 Architecture, and only files that exist', () => {
+  it.skipIf(!ARCHITECTURE)('lists every test in the test table of 007 Architecture, and only files that exist', () => {
     const tests = listed('Tests')
     expect(files('tests').filter(path => /\.spec\.tsx?$/.test(path) && !tests.includes(path))).toEqual([])
     expect(tests.filter(path => !existsSync(join(ROOT, path)))).toEqual([])

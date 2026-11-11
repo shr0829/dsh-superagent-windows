@@ -22,7 +22,7 @@ export async function sendGithub(host: Pick<SourceContext, 'commands'>, message:
   if (!number) throw new Error('Missing GitHub reply target')
   try {
     // Retained trigger URLs also route replies queued before thread-aware delivery.
-    const address = githubAddress(message.channel.address.url ?? '', repository)
+    const address = githubAddress(message.channel.address.url ?? '', repository ?? '')
     let rootId: number | undefined
     if (address?.pr && address.discussion && address.number === number) {
       // Fall back to a top-level PR comment if the target inline review comment was deleted.
@@ -32,7 +32,7 @@ export async function sendGithub(host: Pick<SourceContext, 'commands'>, message:
     }
     const path = rootId === undefined ? `issues/${number}/comments` : `pulls/${number}/comments`
     const marker = `<!-- dsh-superagent:${message.id} -->`
-    const mine = (comment: z.infer<typeof CommentSchema>) => sameName(comment.user?.login ?? '', github.login)
+    const mine = (comment: z.infer<typeof CommentSchema>) => sameName(comment.user?.login ?? '', github?.login ?? '')
       && (rootId === undefined || comment.in_reply_to_id === rootId) && (comment.body ?? '').includes(marker)
     if ((await commands.pages(CommentSchema, path)).some(mine)) return 'sent'
     const target = rootId === undefined ? path : `${path}/${rootId}/replies`

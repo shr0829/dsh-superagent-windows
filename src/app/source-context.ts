@@ -24,8 +24,11 @@ export interface SourceContextDeps {
   readonly feishuProblem?: SetupProblem | undefined
   /** Hands a Trigger to the Engine and schedules the pass that assesses it. */
   receive(trigger: Trigger): ReceiveResult | Promise<ReceiveResult>
+  /** Delivers a message into a DSH Session, at most once per `requestId`; `'gone'` when the Session no longer exists. */
+  deliver(session: string, requestId: string, text: string, mode: 'queue' | 'steer' | { inject: string }): Promise<'sent' | 'gone'>
+  /** Whether the orchestrator owns the Session, as its main Session or a worker's. */
+  owns(session: string): boolean
 }
-
 /**
  * Builds the context for one Source kind. Health reports are restricted to entries declared by the kind and
  * bound to the active registration, becoming no-ops once unregistered.
@@ -44,6 +47,8 @@ export function sourceContextOf(deps: SourceContextDeps, kind: { kind: string; h
       return instance?.enabled ? instance.config : undefined
     },
     receive: trigger => deps.receive(trigger),
+    deliver: (session, requestId, text, mode) => deps.deliver(session, requestId, text, mode),
+    owns: session => deps.owns(session),
     atomic: work => store.atomic(work),
     state: {
       get: name => store.get(name),
