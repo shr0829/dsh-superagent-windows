@@ -76,6 +76,8 @@ Router 是主 Session（代码与 prompt 里叫 `orchestrator`），持 `dsh-sup
 
 Inline & Spill 与链式召回。所有对象都有 id（Ticket、Trigger、Thread、Assignment、Input），投递时先给摘要与 id，超限截断但保留 `read` 路径。硬数字：Assignment 1500 字符、Trigger 600 字符（`src/executor/dsh.ts:113`）；截断时 `capped()` 返回 `{ text, chars, read }`（`:115-116`），资源路径形如 `ticket/<id>/input/<id>`（`:150`）。模型要全文就顺 id 逐跳展开，不要就永不读——上下文按需付费，而不是一次性铺满。
 
+跨 Session 的那一层由记忆补上：`memory/<id>` 是新的资源，卡片只带标题、长度与下一跳的 id，正文与 `links` 留到读的时候再给；记忆默认落 `memory.sqlite`，数据库打不开时整个子系统退回 `memory/` 目录下的 Markdown，编排不受影响（[07 记忆](07-memory.md)）。
+
 多信道。Channel 是 Thread 的写侧，地址由 Source 定义：GitHub 的评论与 review thread、飞书的 topic 回复。输出有硬规定：acknowledgement ≤100 词（`docs/007-architecture.md:548`）。这条规定与"少打扰"同源：一条消息占一个人的注意力，所以先限长度，再要求只在需要人行动或结果可用时说话。
 
 三件事合起来才构成"主动"：agent 在人已经在的地方说话（Channel），说的是人能直接用的长度（100 词），且不需要人先打开它的会话。

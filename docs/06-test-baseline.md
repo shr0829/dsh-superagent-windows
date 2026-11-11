@@ -192,7 +192,8 @@ thread→ticket 与最近的 decision，decision→thread/ticket/trigger）。
    服务静默起不来。改成先删 `[]` 再追加，并对已损坏的 profile 做幂等自愈。
 
 局限：面板没有接管按钮和端点，接管目前只能由主 Session 的工具发起；链式召回没有索引层（无向量、无全文检索），
-多跳靠模型一次次 `orchestrator_read`；批处理的两个"没做"见上。
+多跳靠模型一次次 `orchestrator_read`（跨 Session 的记忆另有 `orchestrator_memory_search` 做词匹配，仍无向量检索，
+见 [07 记忆](07-memory.md)）；批处理的两个"没做"见上。
 
 ## chat 信道：会话里说一句话就走完整个流程
 
@@ -275,3 +276,27 @@ DSH 的 `SessionCreateRequest` 里 `workspaceId` 与 `cwd` 是两个可选字段
 
 全量：`npx vitest run` → Test Files 64 passed | 1 skipped (65)，Tests **1213 passed | 21 skipped (1234)**，0 failed，17.76s；
 `npx tsc --noEmit` exit 0；`scripts\build.ps1` 产出 `lib/index.js` 458,349 B、`lib/client.js` 359,636 B、`lib/chat-watch.js` 5,384 B。
+## 记忆：数据库优先、Markdown 兜底
+
+文章 3.3 的链式召回要求"每次召回本身也 inline 下一跳的摘要与 id"，上一轮只把这条规则用在工作对象之间；Session 一换、
+模型一换，跨会话的事实仍无处可存。本轮新增 src/memory/，设计见 [07 记忆](07-memory.md)，这里只记可核对的断言。
+
+- **两种形态同时写。** `openMemory(stateDir)` 给出 `memory.sqlite` 与 `memory/`；`save` 落到两边，
+  `get` 先数据库后 Markdown，`all` 按 id 合并、数据库赢、按 `at` 倒序。数据库打不开（把 `memory.sqlite`
+  先建成目录即复现）时返回 Markdown 单形态，`status().fallback` 带原因，读写照常。
+- **链在读取时现算。** 卡片 `memoryCard` 只给 `memory_id/title/kind/at/tags/next/chars/read`；读
+  `memory/<id>` 才把 `next` 逐条换成 `links`，目标已消失的一跳被丢掉（`memoryTarget`），正文按 4000
+  字符分页，资源侧去掉卡片自己的 `read`。关系名由 `memoryRelation` 给：记忆之间是 `continues`，
+  工作对象用前缀。
+- **id 与地址。** `mem_` + FNV-1a 八位十六进制 + 两位种子里程；`next` 只接受 `memory/`、`ticket/`、
+  `thread/`、`decision/`、`trigger/` 五种前缀，存不进别的地址。`thread/` 与 `trigger/` 的键由 Source 定义，
+  允许冒号（`thread/feishu:oc_team:om_1`），不允许斜杠。
+- **模型面。** `orchestrator_memory_save`、`orchestrator_memory_search`；资源 `memories`、`memory/<id>`。
+  `tests/model-surface.spec.ts` 的 `BUDGET.orchestrator` 从 59_000 提到 61_000（实测 60_465）。
+
+测试：`tests/memory.spec.ts` 8 条（Markdown 往返、双写、数据库缺失兜底、合并顺序、链式召回含死跳丢弃与分页、
+带冒号的 thread 键与 `source` 回跳、正文分页、四位置词搜索）。`docs/upstream/007-architecture.md` 的模块表与
+测试表同步登记。
+
+全量：`node_modules\.bin\tsc.CMD --noEmit` exit 0；`node_modules\.bin\vitest.CMD run` →
+Test Files 65 passed | 1 skipped (66)，Tests **1221 passed | 21 skipped (1242)**，0 failed，17.94s。

@@ -2,6 +2,7 @@
 import { latestReport, reasonText, threadKey, ticketStage, type Decision, type Mandate, type Thread, type Ticket, type TicketInput,
   type Trigger, type TriggerDisposition } from '../core/index.ts'
 import { pullOf } from '../sources/github-pull.ts'
+import { memoryResource, type MemoryRecord } from '../memory/index.ts'
 import { batchLine, inputResource } from '../executor/dsh.ts'
 
 /** Collapses whitespace and truncates text for display previews while keeping code, angle brackets, and links intact for model readers. */
@@ -84,6 +85,16 @@ export function decisionCard(decision: Decision) {
 export function decisionDetails(decision: Decision) {
   return { ...decisionCard(decision), ...(decision.mandate ? { mandate: mandateOf(decision.mandate) } : {}),
     ...(decision.audit ? { audit: decision.audit } : {}) }
+}
+/**
+ * One memory as a card: the title and where it came from, with the next hops it continues inlined as resource paths and
+ * the body left behind `read` (Inline & Spill). A reader follows one hop, then the next, never a whole subtree.
+ */
+export function memoryCard(record: MemoryRecord) {
+  return { memory_id: record.id, title: record.title, kind: record.kind, at: record.at,
+    ...record.thread ? { thread: record.thread } : {}, ...record.ticketId ? { ticket_id: record.ticketId } : {},
+    ...record.source ? { source: record.source } : {}, ...record.tags.length ? { tags: record.tags } : {},
+    next: record.next, chars: record.text.length, read: memoryResource(record.id) }
 }
 /** Slices text by UTF-16 code units so concatenated pages reconstruct the exact string. */
 export function textPage(resource: string, text: string, offset: number, limit: number) {
