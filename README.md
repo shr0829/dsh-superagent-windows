@@ -34,14 +34,15 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dsh-superagent.ps1 s
 start http://127.0.0.1:3082/orchestrator
 ```
 
-`install.ps1` 做的六件事，与上游 `docs/006-deployment.md` 的 Install 段一一对应：
+`install.ps1` 做的七件事，与上游 `docs/006-deployment.md` 的 Install 段一一对应：
 
 1. preflight：Node、git、`dsh`，`stateDir` 必须是绝对路径且不含空格（`worker-bin` 要拼进 PATH）；
 2. `scripts\build.ps1`：源码已随仓库提供，`pnpm install --frozen-lockfile` + `pnpm build`，产物落在 `lib\`；
 3. `dsh <profile> --from-default-profile web --dump-config`：建独立 profile（默认名 `superagent`），操作者自己的 Session 不受影响；
 4. `dsh plugin --profile <profile> add link:<checkout>`：把构建产物作为 bundle 挂进 profile；
 5. 往 `cordis.patch.yml` 追加机器配置：`webserver` 绑 `127.0.0.1:3082`，`dsh-superagent.stateDir`；
-6. `scripts\new-agent-cli.ps1`：生成 `gh-agent.cmd`（agent 自己的 GitHub 账号）与 `lark-bot.cmd`（可选）。
+6. `scripts\set-background-wake.ps1 -State off`：后台任务结束时不再自动唤醒会话开新回合（`docs/08-background-wake.md`）；
+7. `scripts\new-agent-cli.ps1`：生成 `gh-agent.cmd`（agent 自己的 GitHub 账号）与 `lark-bot.cmd`（可选）。
 
 ## 仓库结构
 
@@ -55,6 +56,7 @@ scripts\
   register-task.ps1     注册"登录启动 + 每小时巡检"两个计划任务
   unregister-task.ps1   删除计划任务
   new-agent-cli.ps1     生成 gh-agent.cmd / lark-bot.cmd 凭据包装器
+  set-background-wake.ps1  后台自跑的开关：status / off / on（改 profile 的 tool-jobs override）
   test-scripts.ps1      自检：BOM、语法、语法树引用的文件是否存在
   fix-encoding.ps1      编辑器丢 BOM 之后补回来（统一成 UTF-8 with BOM + CRLF)
   sync-upstream.ps1     拉上游基线作对照克隆，报出本仓库改了哪些文件
@@ -66,12 +68,14 @@ vendor\
   upstream.lock.json    上游基线 commit 与版本约束（只用于对照与升级，不参与构建）
 docs\
   00-overview.md        这个系统在解决什么问题：五个模块、两级过滤、订阅直通、上下文档位
-  01-windows-deltas.md  Windows 与原型的 12 处差异，以及为什么必须这样改
+  01-windows-deltas.md  Windows 与原型的 13 处差异，以及为什么必须这样改
   02-install.md         安装：前置、分步、验证、升级与回滚
   03-operate.md         运维：日常命令、计划任务、退出码、排障对照表
   04-settings-api.md    Management API 与四块 Settings 的 Windows 取值
   05-design.md          并发与解耦的设计共识：分区、消息、锁、验收判据、未决项
   06-test-baseline.md    Windows 上的测试基线：43 条失败的分类与分支 2 的起点
+  07-memory.md           记忆（memory）：会话摘要、召回与 forget 的落点
+  08-background-wake.md  后台自跑：job 结算为什么会唤醒会话、代价、开关与管不到的路径
 ```
 
 ## 三条必须知道的约束

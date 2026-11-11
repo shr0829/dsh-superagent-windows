@@ -23,6 +23,19 @@
     # 升级前必须备份这里（见 docs/03-operate.md）。
     stateDir: 'C:/Users/CHANGE_ME/.dsh/state/superagent'
 
+# 后台自跑：后台任务结束时要不要唤醒空闲会话，自己开一个新回合。
+# 默认关闭（completionDelivery: quiet）：通知留在收件箱，等你下次说话时随上下文一起带进来；
+# 被 job 拖住的等待照常，job_output / job_list 随时能收。
+# 要开回来就把 quiet 换成 wakeup，并把 maxConsecutiveWakes 设成你能接受的连续唤醒次数（DSH 的 schema 是 min 1）。
+# scripts\install.ps1 用 scripts\set-background-wake.ps1 写这一段；手改时注意 Cordis 的 config 是整块替换，
+# 不写 waitTimeoutMs / maxWaitTimeoutMs 就回到 DSH 默认的 30000 / 600000。机制见 docs\08-background-wake.md。
+- id: tool-jobs
+  config:
+    completionDelivery: quiet
+    maxConsecutiveWakes: 1
+    waitTimeoutMs: 30000
+    maxWaitTimeoutMs: 600000
+
 # 飞书是可选的。装了 lark-cli 并配好 bot 包装器之后再把这段打开。
 # - id: dsh-superagent-feishu
 #   disabled: false
