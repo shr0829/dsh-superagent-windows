@@ -229,40 +229,8 @@ if ($ghPath) {
         Add-Row 'gh CLI' 'WARN' '存在但读不到版本'
     }
 
-    # 变更请求面板由宿主进程直接启动 gh，子进程继承宿主环境，所以面板用的是
-    # DSH 启动那一刻的 PATH，不是你现在这个终端的 PATH。gh 装得比 DSH 晚，
-    # 面板就会一直显示“无法读取变更请求状态”，而命令行里一切正常。
-    $hostPathHit = Get-Command gh -ErrorAction SilentlyContinue
-    if ($hostPathHit) {
-        Add-Row 'gh 在宿主 PATH' 'PASS' $hostPathHit.Source
-    } else {
-        Add-Row 'gh 在宿主 PATH' 'WARN' '本进程 PATH 里没有 gh：重启 DSH，或把 gh.exe 放到已在 PATH 的目录，面板才能读到状态'
-    }
-
-    $authText = ((& $ghPath auth status --hostname github.com 2>&1) -join "`n")
-    $authLogin = $null
-    if ($authText -match 'Logged in to github\.com account (\S+)') { $authLogin = $Matches[1] }
-    $authScopes = $null
-    # 一行里可能有多个 scope（'gist', 'repo', 'workflow'），要取到行尾而不是第一个引号
-    $scopeMatch = [regex]::Match($authText, "(?m)^\s*-\s*Token scopes:\s*(.+?)\s*$")
-    if ($scopeMatch.Success) { $authScopes = $scopeMatch.Groups[1].Value }
-    if ($authLogin) {
-        Add-Row 'gh 账号' 'PASS' "$authLogin（scopes: $authScopes）"
-        if ($authText -match "Missing required token scopes: '([^']+)'") {
-            Add-Row 'gh scopes' 'WARN' "缺 $($Matches[1])：只影响 org 级命令，仓库与 PR 不受影响"
-        }
-    } else {
-        Add-Row 'gh 账号' 'FAIL' '未登录：scripts\setup-gh.ps1 或 gh auth login'
-    }
-
-    if ($Repository -and $authLogin) {
-        $push = ((& $ghPath api "repos/$Repository" --jq '.permissions.push' 2>&1) -join ' ').Trim()
-        if ($push -eq 'true') {
-            Add-Row "仓库 $Repository" 'PASS' "$authLogin 可推送，能开 PR"
-        } else {
-            Add-Row "仓库 $Repository" 'FAIL' "push=$push：账号没有该仓库写权限"
-        }
-    }
+    # 只查版本：上游要求 gh 2.48+（GH_CONFIG_DIR 的隔离行为在更早版本上不一致）。
+    # 登录状态、账号名、仓库权限属于操作者本机的凭据配置，不写进这个仓库的体检项。
 } else {
     Add-Row 'gh CLI' 'FAIL' '未安装：winget install --id GitHub.cli --exact'
 }

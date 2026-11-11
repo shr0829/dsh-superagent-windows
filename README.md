@@ -50,12 +50,11 @@ scripts\
   dsh-superagent.ps1    服务控制：status / start / stop / restart / logs / open / doctor
   install.ps1           一键安装（等价上游 Install 段）
   build.ps1             按 lock 文件拉取并构建上游，产出 upstream\lib
-  doctor.ps1            只读体检，14 项 PASS/WARN/FAIL
+  doctor.ps1            只读体检，15 项 PASS/WARN/FAIL
   watchdog.ps1          每小时巡检判断（无 agent 也能跑）
   register-task.ps1     注册"登录启动 + 每小时巡检"两个计划任务
   unregister-task.ps1   删除计划任务
   new-agent-cli.ps1     生成 gh-agent.cmd / lark-bot.cmd 凭据包装器
-  setup-gh.ps1          把 gh 配到能推分支、能开 PR：装、认账号、setup-git、验权限
   test-scripts.ps1      自检：BOM、语法、语法树引用的文件是否存在
   fix-encoding.ps1      编辑器丢 BOM 之后补回来（统一成 UTF-8 with BOM + CRLF）
   lib\common.ps1        共用：UTF-8 无 BOM 读写、免代理 HTTP GET、版本号解析
@@ -70,7 +69,6 @@ docs\
   02-install.md         安装：前置、分步、验证、升级与回滚
   03-operate.md         运维：日常命令、计划任务、退出码、排障对照表
   04-settings-api.md    Management API 与四块 Settings 的 Windows 取值
-  05-github-cli.md      gh 配置：为什么绕过 auth login、hosts.yml 格式、自动开 PR 的三段命令
 ```
 
 ## 三条必须知道的约束
@@ -94,7 +92,7 @@ HTTP 用 `HttpWebRequest` 而不是 `Invoke-RestMethod -NoProxy`（5.1 没有这
 ## 现在能跑到哪一步
 
 已在本机验证：
-- `doctor.ps1` 14 项检查全部按预期给出 PASS/WARN（`dsh 0.2.2-rc.1`、Node 24.18、git 2.56）；
+- `doctor.ps1` 15 项检查全部按预期给出 PASS/WARN（`dsh 0.2.2-rc.1`、Node 24.18、git 2.56）；
 - `dsh-superagent.ps1 status` 在没有服务时输出完整 JSON 并以 1 退出，`logs` 以 0 退出；
 - 所有脚本通过 5.1 语法树解析（`scripts\test-scripts.ps1`）；
 - `build.ps1` 能从锁定 commit 完整跑通：clone → `npx pnpm@11.7.0 install --frozen-lockfile`（234 个包）→ `tsdown`
