@@ -10,7 +10,7 @@
 | 4 | `bash-sandbox` / `tool-bash` | bundle 已按平台切，无需改 | 不启用 bash 工具；prepare 仍需 `sh` |
 | 5 | `#!/bin/sh` 的 `gh-agent` / `lark-bot` | shebang 与权限位不生效 | `scripts/new-agent-cli.ps1` 生成 `.cmd` |
 | 6 | 绝对 `stateDir` | 空格/中文/长路径 | `scripts/install.ps1` 校验 + `core.longpaths` |
-| 7 | 输出与文件的 UTF-8 | 5.1 默认 ANSI/UTF-16 | `scripts/lib/common.ps1` 的统一编码层 |
+| 7 | 输出与文件的 UTF-8 | 5.1 默认 ANSI 读文件、UTF-16 写管道 | 脚本带 BOM + 全链路显式 UTF-8（`scripts/lib/common.ps1`） |
 | 8 | LF 的 `cordis.patch.yml` | autocrlf 改写行尾 | 仓库内 `.gitattributes` |
 | 9 | 只监听 `127.0.0.1` | 防火墙弹窗诱导放通 | `install.ps1` 写死回环 + 提示里选取消 |
 | 10 | node 22.19+、pnpm 11.7、dsh 0.2.1 | 桌面版 CLI 路径不同 | `scripts/build.ps1` + npm 全局 dsh |
@@ -65,7 +65,7 @@ Windows：没有 tmux；`Start-Process` 起的进程不受 RDP/SSH 断线影响�
 
 要守住两件事：
 
-**其一，同一 profile 里不要同时启用 bash 与 pwsh 两套 shell 工具。** 模型看到两个 shell 会按措辞挑，而两者语义不同：pwsh 单引号不插值、反引号才是转义、管道传对象；bash 用 `$'...'`、`&&` 短路、`\` 是转义符。同一段 Ticket 指令在两种 shell 下结果不同，出问题时无法归因。
+**其一，同一 profile 里不要同时启用 bash 与 pwsh 两套 shell 工具。** 模型看到两个 shell 会按措辞挑，而两者语义不同：pwsh 工具单引号不插值、反引号才是转义、管道传对象；bash 用 `$'...'`、`&&` 短路、`\` 是转义符。同一段 Ticket 指令在两种 shell 下结果不同，出问题时无法归因。注意本机 `pwsh` 这个名字解析到 PowerShell 5.1，插件名照旧叫 `pwsh-sandbox` / `tool-pwsh`，实际跑的是 5.1 语法。
 
 **其二，prepare 命令仍按 POSIX 语义执行。** `src/executor/dsh.ts:254` 固定拼 `['sh','-c',command]`，面板文案写"用 sh 运行一次"（`src/client/locales.ts:376`），`docs/003-execution.md:51` 写明 "runs once with `sh`"。所以 `config/prepare-worktree.ps1` 是 PowerShell 写的，实际调用方式是让 `sh` 去起它：`powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "C:\...\config\prepare-worktree.ps1"`，前提是 Git for Windows 的 `sh.exe` 在 PATH 上。由此得到两条约束：prepare 命令行本身必须是 sh 能解析的单行（路径全加引号），脚本内部才用 PowerShell 语法。
 
@@ -103,9 +103,9 @@ Windows 上的两个坑：
 
 ## 7 编码与 PowerShell 版本
 
-目标环境是 stock Windows：脚本第一行一律 `#Requires -Version 5.1`，5.1 与 7 都能跑，不为跑一个控制脚本先装 PowerShell 7。
+目标环境是 stock Windows，解释器就是系统自带的 `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`（5.1；本机没有 `C:\Program Files\PowerShell`，`pwsh` 这个名字也解析到 5.1）。脚本第一行一律 `#Requires -Version 5.1`，且刻意只用 5.1 有的语法：不用 `??`、`?:`、`-AsHashtable`、`-Encoding utf8NoBOM`、`Invoke-RestMethod -NoProxy`，HTTP 走 `HttpWebRequest`，文件读写走显式编码的包装函数。
 
-- `.ps1` 必须带 UTF-8 BOM。5.1 读无 BOM 文件时按系统 ANSI 代码页解码，中文注释会吃掉后面的引号与换行，报出一串与真实原因无关的语法错误。`scripts/test-scripts.ps1:33-35` 逐文件检查 BOM 位，缺了直接失败。
+- `.ps1` 必须带 UTF-8 BOM。这是保命项，不是风格问题：5.1 读无 BOM 文件时按系统 ANSI 代码页（本机 GBK）解码，中文注释会吃掉后面的引号与换行，报出一串与真实原因无关的语法错误——错误行号、错误类型全都指向不存在的问题。`scripts/test-scripts.ps1:33-35` 逐文件检查 BOM 位，缺了直接失败，CI 也跑它。
 - 运行时输出：`Set-ConsoleUtf8`（`scripts/lib/common.ps1:18-23`）把 `[Console]::OutputEncoding` 与 `$OutputEncoding` 设成 `UTF8Encoding($false)`，日志与 JSON 因此是无 BOM 的 UTF-8，`ConvertFrom-Json`、巡检与上游的 `json.load` 读得动。
 - 文件读写：一律 `Read-Utf8Text` / `Write-Utf8Text`（:26-43），内部用 `[System.IO.File]` 显式指定编码，不依赖 `Get-Content` / `Set-Content` 的默认值——5.1 的默认是 ANSI，读 UTF-8 的 YAML 会乱码，写回去就毁文件。
 - HTTP：`Invoke-JsonGet`（:46-79）用 `HttpWebRequest` 且 `Proxy = $null`。5.1 没有 `Invoke-RestMethod -NoProxy`，而本机配了系统代理时，`127.0.0.1` 的请求可能被代理吞掉，表现为"服务明明起着却查不到状态"。
