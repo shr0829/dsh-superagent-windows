@@ -129,8 +129,6 @@ const TEXT = {
   'memory.supersedes': ['合并自', 'Merged from'],
   'memory.select': ['选择', 'Select'],
   'memory.merge': ['合并所选', 'Merge selected'],
-  'memory.mergeHint': ['选两条以上，合并后原文被一条新记忆取代，旧条目删除。',
-    'Pick two or more; the originals are replaced by one new memory and then deleted.'],
   'memory.mergeTitle': ['合并记忆', 'Merge memories'],
   'memory.mergeBody': ['把 {count} 条记忆合并成一条？旧条目会从数据库和 Markdown 中删除，新条目记下它们的编号。',
     'Merge {count} memories into one? The originals are deleted from the database and the Markdown copy, and the new memory records their ids.'],

@@ -71,7 +71,6 @@ function MemoryListPage({ query }: { query?: string }) {
         <Button variant="ghost" onClick={() => setMerging(false)}>{t('cancel')}</Button>
         <Button variant="primary" disabled={merge.busy} onClick={() => void merged()}>{t('memory.merge')}</Button>
       </>}>
-      <Hint>{t('memory.mergeHint')}</Hint>
     </Modal>
   </>
 }
@@ -88,7 +87,6 @@ function MemoryDetailPage({ id }: { id: string }) {
     {error instanceof ApiError && error.missing ? <Hint>{t('memory.notFound')}</Hint> : <LoadState error={error} loading />}</>
   return <>
     <PageHead title={data.title}>
-      <Button variant="ghost" icon={<Icon name="chevron-left" />} onClick={() => navigate({ page: 'memory' })}>{t('tab.memory')}</Button>
       <ConfirmButton variant="outline" icon="trash" label={t('memory.forget')} title={t('memory.forgetTitle')}
         message={t('memory.forgetBody', { title: data.title })} onConfirm={forgotten} />
     </PageHead>
