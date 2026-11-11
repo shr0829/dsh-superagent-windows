@@ -233,7 +233,9 @@ if ($ghPath) {
     $authLogin = $null
     if ($authText -match 'Logged in to github\.com account (\S+)') { $authLogin = $Matches[1] }
     $authScopes = $null
-    if ($authText -match "Token scopes: '([^']+)'") { $authScopes = $Matches[1] }
+    # 一行里可能有多个 scope（'gist', 'repo', 'workflow'），要取到行尾而不是第一个引号
+    $scopeMatch = [regex]::Match($authText, "(?m)^\s*-\s*Token scopes:\s*(.+?)\s*$")
+    if ($scopeMatch.Success) { $authScopes = $scopeMatch.Groups[1].Value }
     if ($authLogin) {
         Add-Row 'gh 账号' 'PASS' "$authLogin（scopes: $authScopes）"
         if ($authText -match "Missing required token scopes: '([^']+)'") {
