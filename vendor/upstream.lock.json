@@ -1,0 +1,22 @@
+{
+  "source": "https://github.com/deepseek-ai/dsh-superagent-prototype.git",
+  "commit": "8c32a9dc5d72c033816c6a8110b37f40cf94fba4",
+  "commitDate": "2026-10-31T20:05:39+08:00",
+  "commitSubject": "feat: add the dsh-superagent research prototype",
+  "package": {
+    "name": "dsh-superagent",
+    "version": "0.1.0",
+    "license": "MIT"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0",
+    "dsh": "^0.2.1-alpha.2"
+  },
+  "packageManager": "pnpm@11.7.0",
+  "verifiedDsh": "0.2.1-rc.3",
+  "notes": [
+    "锁定提交是 2026-10-31 上游的唯一提交（git log -1 --format=%H 得到），scripts/build.ps1 默认 checkout 这个 SHA。",
+    "verifiedDsh 是本仓库文档里用于安装验证的 dsh 版本；换版本时先确认仍在 engines.dsh 范围内，否则插件会被判为不兼容。",
+    "升级上游：改这里的 commit → 跑 scripts/build.ps1 → 重启服务，见 docs/03-operate.md 的升级段。"
+  ]
+}

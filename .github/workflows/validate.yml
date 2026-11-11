@@ -1,0 +1,48 @@
+name: validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  scripts:
+    name: 脚本自检（BOM + 语法）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 检查 UTF-8 BOM 与语法
+        shell: pwsh
+        run: ./scripts/test-scripts.ps1
+
+      - name: doctor 能在干净 runner 上正常输出（缺失项只允许是 WARN/FAIL，不许崩）
+        shell: pwsh
+        continue-on-error: true
+        run: ./scripts/doctor.ps1
+
+  markdown:
+    name: 链接与文档基础检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: docs 里引用的本地文件必须存在
+        shell: bash
+        run: |
+          set -euo pipefail
+          fail=0
+          while IFS= read -r -d '' file; do
+            dir=$(dirname "$file")
+            while IFS= read -r link; do
+              [ -z "$link" ] && continue
+              case "$link" in http*|\#*|mailto:*) continue ;; esac
+              target="${link%%#*}"
+              if [ ! -e "$dir/$target" ] && [ ! -e "$target" ]; then
+                echo "missing: $file -> $link"
+                fail=1
+              fi
+            done < <(grep -oE '\]\([^)]+\)' "$file" | sed -E 's/^\]\(//; s/\)$//')
+          done < <(find . -name '*.md' -not -path './upstream/*' -print0)
+          exit $fail

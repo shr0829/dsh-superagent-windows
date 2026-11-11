@@ -1,0 +1,24 @@
+# 上游代码的本地构建副本（用 scripts/build.ps1 拉取，不入库）
+/upstream/
+
+# 运行期产物：日志、PID、控制文件、数据库
+/.artifacts/
+/state/
+
+# 机器相关配置（含 stateDir 绝对路径、端口），由 config/profile.cordis.patch.yml 生成
+/local/
+*.local.yml
+*.local.json
+
+# Node / pnpm
+node_modules/
+.pnpm-store/
+*.tsbuildinfo
+
+# 编辑器与系统
+.vs/
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+*.swp

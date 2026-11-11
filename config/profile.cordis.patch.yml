@@ -1,0 +1,28 @@
+# dsh-superagent 的 profile 级机器配置（Windows）。
+#
+# 这个文件的落点：%USERPROFILE%\.dsh\profiles\<profile>\cordis.patch.yml
+# scripts\install.ps1 会把下面两段追加到已有 patch 末尾，不覆盖 dsh plugin add 写进去的 bundle 引用。
+#
+# 与上游 examples/profile.cordis.patch.yml 的差别只有一处：
+#   - 上游示例用 POSIX 绝对路径（/home/me/.dsh/state/superagent），这里必须是 Windows 绝对路径，
+#     且路径里不能有空格 —— worker-bin 会把 stateDir 拼进 PATH，空格会切断 PATH 项。
+#
+# 可选键（都给 dsh-superagent 插件，缺省即上游默认值）：
+#   promptMaxChars            单次注入 prompt 的字符上限
+#   admissionContextMaxPages  准入阶段读取上下文的页数上限
+#   admissionContextTimeoutMs 准入阶段读取上下文的超时（毫秒）
+
+- id: webserver
+  config:
+    host: 127.0.0.1      # 只监听回环地址；上游部署路径从不把它暴露到局域网
+    port: 3082
+
+- id: dsh-superagent
+  config:
+    # 必填、绝对路径。含数据库 orchestrator.sqlite、锁、worker-bin shim、agent git 配置、默认 Ticket 目录。
+    # 升级前必须备份这里（见 docs/03-operate.md）。
+    stateDir: 'C:/Users/CHANGE_ME/.dsh/state/superagent'
+
+# 飞书是可选的。装了 lark-cli 并配好 bot 包装器之后再把这段打开。
+# - id: dsh-superagent-feishu
+#   disabled: false

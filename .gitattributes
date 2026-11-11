@@ -1,0 +1,22 @@
+# Windows 构建仓库的换行与编码约定：
+# - PowerShell 脚本与 cmd 包装器必须 CRLF；.ps1 还必须带 UTF-8 BOM（5.1 否则按 ANSI 解码中文）
+# - YAML / Markdown / JSON 用 LF，避免 cordis.patch.yml 被 autocrlf 改成 CRLF 后与上游包内文件不一致
+# - 本文件自身与 .gitignore、LICENSE 也用 LF：它们被别的工具读，不需要 Windows 行尾
+* text=auto
+
+*.ps1   text eol=crlf
+*.psm1  text eol=crlf
+*.cmd   text eol=crlf
+*.bat   text eol=crlf
+
+*.yml         text eol=lf
+*.yaml        text eol=lf
+*.md          text eol=lf
+*.json        text eol=lf
+.gitattributes text eol=lf
+.gitignore     text eol=lf
+LICENSE        text eol=lf
+
+*.png   binary
+*.ico   binary
+*.zip   binary
