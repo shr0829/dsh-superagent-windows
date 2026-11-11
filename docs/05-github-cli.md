@@ -111,7 +111,53 @@ gh pr merge --repo shr0829/dsh-superagent-windows --squash --auto --delete-branc
 上游把"哪些 PR 可以自动合"放在 Settings → Prompts 里（auto-merge 条件、review bots、commit 作者），
 判定在 Orchestrator 侧，`gh` 只负责执行。所以这里的配置只解决"有没有能力"，不决定"该不该合"。
 
-## 七、agent 用独立账号时
+## 七、面板读不到状态，命令行却一切正常
+
+症状很具体：`gh auth status` 在终端里 exit 0，推分支、开 PR、合并全都好使，但 GUI 侧栏的「变更请求」标签页顶部写着
+
+```
+登录 github.com 后才能显示变更请求状态
+gh auth login --hostname github.com
+```
+
+每张 PR 卡片写着「无法读取变更请求状态」。
+
+原因是**面板不在你的终端里跑 gh**。变更请求面板（`@deepseek-ai/dsh-experimental-forge-github`）以宿主进程的形式启动 `gh`，
+子进程继承宿主环境——也就是 DSH 应用**启动那一刻**的 PATH。gh 装得比 DSH 晚，宿主 PATH 里就没有
+`C:\Program Files\GitHub CLI\`，`spawn('gh')` 直接 ENOENT。
+
+三种结果要分清（同一处代码路径，报错却完全不同）：
+
+| 探测结果 | 触发条件 | 面板表现 |
+| --- | --- | --- |
+| `ready` | `gh auth status --hostname github.com` 退出码 0 | 正常显示状态与检查 |
+| `unauthenticated` | gh 起来了但退出码非 0 | 让你去 `gh auth login` |
+| `unavailable` | gh 根本起不来（PATH 里没有） | 同样让你去登录，但登录也没用 |
+
+本机就是第三种：DSH 进程启动于 2026-11-09，gh 装于 2026-11-11，中间的 PATH 变更没有任何进程会继承。
+在 DSH 的 pwsh 里 `Get-Command gh` 为空、`$env:Path` 不含 `GitHub CLI`，就是宿主 PATH 的直接证据。
+
+两种处理：
+
+1. **重启 DSH**。宿主进程重新继承 machine PATH（`C:\Program Files\GitHub CLI\` 已在里面），面板恢复。这是正解。
+2. **不想重启**：把 `gh.exe` 放进一个已经在宿主 PATH 上的目录。本机用的是
+   `C:\Users\s1215\AppData\Local\Microsoft\WindowsApps\`（默认在 PATH 上、且用户可写）；
+   gh 是 Go 静态链接的单文件（41.8 MB），拷过去就能跑，不需要其它 DLL。
+
+```powershell
+Copy-Item 'C:\Program Files\GitHub CLI\gh.exe' "$env:LOCALAPPDATA\Microsoft\WindowsApps\gh.exe"
+```
+
+这份拷贝只是过渡桥：gh 升级它不会跟着升级，重启 DSH 之后应当删掉，让 PATH 指向真正的安装目录。
+
+还有一个容易误判的点：面板**故意不转发** `GH_TOKEN` / `GITHUB_TOKEN`——子进程环境里名字含
+`KEY`、`PASSWORD`、`SECRET`、`TOKEN` 的变量全部被剥掉，`DSH_*` 也不转发。所以你在 shell 里
+`export GH_TOKEN=...` 对面板无效，它只认 gh 自己的 `hosts.yml`。这也正是本仓库走 `setup-gh.ps1`
+写 `hosts.yml` 而不是设环境变量的原因。
+
+`doctor.ps1` 为此加了一行 `gh 在宿主 PATH`：它跑在宿主进程里，`Get-Command gh` 为空就说明面板必然读不到状态。
+
+## 八、agent 用独立账号时
 
 上游的设计是**执行器用 agent 自己的 GitHub 账号**，与你本人的账号分开：PR 的 commit 作者、
 评论者都是 agent，出了事能一眼分清谁做的。落地方式是 `gh-agent.cmd`：
@@ -130,7 +176,7 @@ gh-agent api user --jq .login  # 复核
 
 只用同一个账号也能跑通全部流程，只是 PR 上看不出"这是 agent 做的"。
 
-## 八、故障对照
+## 九、故障对照
 
 | 现象 | 原因 | 处理 |
 | --- | --- | --- |
@@ -142,8 +188,10 @@ gh-agent api user --jq .login  # 复核
 | `Auto-merge is not allowed` | 仓库没开 allow auto-merge | Settings → General 打开，或去掉 `--auto` |
 | `gh pr create` 提示无 upstream 分支 | 分支没 push 或没设 upstream | 先 `git push -u origin HEAD` |
 | 执行器报 `@x cannot push to y` | agent 账号没有该仓库写权限 | 把 agent 账号加成 collaborator，或换有权限的账号 |
+| 面板叫你去 `gh auth login`，但终端里已登录 | 宿主进程 PATH 里没有 gh（DSH 启动早于 gh 安装） | 重启 DSH，或把 gh.exe 放进宿主 PATH 上的目录；`doctor.ps1` 看 `gh 在宿主 PATH` |
+| 面板读不到状态，`GH_TOKEN` 设了也没用 | 面板剥掉名字含 TOKEN/KEY/SECRET/PASSWORD 的环境变量 | 走 `hosts.yml`，用 `setup-gh.ps1` |
 
-## 九、还没验的部分
+## 十、还没验的部分
 
 - agent 用**独立** bot 账号跑完整 Ticket 的链路（本机只有 `shr0829` 一个账号，`gh-agent` 尚未登录 bot 账号）；
 - PR 的 review bots 与 auto-merge 条件在 Orchestrator 侧的判定（属于 Settings → Prompts，不在本仓库范围）；

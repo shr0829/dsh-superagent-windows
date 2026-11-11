@@ -229,6 +229,16 @@ if ($ghPath) {
         Add-Row 'gh CLI' 'WARN' '存在但读不到版本'
     }
 
+    # 变更请求面板由宿主进程直接启动 gh，子进程继承宿主环境，所以面板用的是
+    # DSH 启动那一刻的 PATH，不是你现在这个终端的 PATH。gh 装得比 DSH 晚，
+    # 面板就会一直显示“无法读取变更请求状态”，而命令行里一切正常。
+    $hostPathHit = Get-Command gh -ErrorAction SilentlyContinue
+    if ($hostPathHit) {
+        Add-Row 'gh 在宿主 PATH' 'PASS' $hostPathHit.Source
+    } else {
+        Add-Row 'gh 在宿主 PATH' 'WARN' '本进程 PATH 里没有 gh：重启 DSH，或把 gh.exe 放到已在 PATH 的目录，面板才能读到状态'
+    }
+
     $authText = ((& $ghPath auth status --hostname github.com 2>&1) -join "`n")
     $authLogin = $null
     if ($authText -match 'Logged in to github\.com account (\S+)') { $authLogin = $Matches[1] }
