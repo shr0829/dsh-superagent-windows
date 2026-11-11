@@ -206,6 +206,56 @@ if ($null -eq $state) {
 }
 
 # ---------------------------------------------------------------- 账号与凭据
+# gh CLI：winget 装的固定落在 Program Files，但 PATH 可能要重开终端才生效，
+# 所以这里同时在 PATH 与默认安装路径里找。
+$ghPath = $null
+$ghCommand = Get-Command gh -ErrorAction SilentlyContinue
+if ($ghCommand) {
+    $ghPath = $ghCommand.Source
+} elseif (Test-Path "$env:ProgramFiles\GitHub CLI\gh.exe") {
+    $ghPath = "$env:ProgramFiles\GitHub CLI\gh.exe"
+}
+if ($ghPath) {
+    $ghVersion = ((& $ghPath --version 2>&1) -join ' ')
+    $ghNumber = $null
+    if ($ghVersion -match 'gh version (\d+)\.(\d+)\.(\d+)') {
+        $ghNumber = [version]("{0}.{1}.{2}" -f $Matches[1], $Matches[2], $Matches[3])
+    }
+    if ($ghNumber -and $ghNumber -ge [version]'2.48.0') {
+        Add-Row 'gh CLI' 'PASS' "$ghNumber ($ghPath)"
+    } elseif ($ghNumber) {
+        Add-Row 'gh CLI' 'FAIL' "$ghNumber 低于上游要求的 2.48"
+    } else {
+        Add-Row 'gh CLI' 'WARN' '存在但读不到版本'
+    }
+
+    $authText = ((& $ghPath auth status --hostname github.com 2>&1) -join "`n")
+    $authLogin = $null
+    if ($authText -match 'Logged in to github\.com account (\S+)') { $authLogin = $Matches[1] }
+    $authScopes = $null
+    if ($authText -match "Token scopes: '([^']+)'") { $authScopes = $Matches[1] }
+    if ($authLogin) {
+        Add-Row 'gh 账号' 'PASS' "$authLogin（scopes: $authScopes）"
+        if ($authText -match "Missing required token scopes: '([^']+)'") {
+            Add-Row 'gh scopes' 'WARN' "缺 $($Matches[1])：只影响 org 级命令，仓库与 PR 不受影响"
+        }
+    } else {
+        Add-Row 'gh 账号' 'FAIL' '未登录：scripts\setup-gh.ps1 或 gh auth login'
+    }
+
+    if ($Repository -and $authLogin) {
+        $push = ((& $ghPath api "repos/$Repository" --jq '.permissions.push' 2>&1) -join ' ').Trim()
+        if ($push -eq 'true') {
+            Add-Row "仓库 $Repository" 'PASS' "$authLogin 可推送，能开 PR"
+        } else {
+            Add-Row "仓库 $Repository" 'FAIL' "push=$push：账号没有该仓库写权限"
+        }
+    }
+} else {
+    Add-Row 'gh CLI' 'FAIL' '未安装：winget install --id GitHub.cli --exact'
+}
+
+# agent 账号单独一套配置目录，与操作者自己的 gh 分开
 $ghAgent = Get-Command gh-agent -ErrorAction SilentlyContinue
 if ($ghAgent) {
     $login = ((& gh-agent api user --jq .login 2>&1) -join ' ').Trim()
@@ -217,9 +267,9 @@ if ($ghAgent) {
     if ($Repository) {
         $repoCheck = ((& gh-agent api "repos/$Repository" --jq .full_name 2>&1) -join ' ').Trim()
         if ($repoCheck -eq $Repository) {
-            Add-Row "仓库 $Repository" 'PASS' 'agent 账号可读'
+            Add-Row "agent 仓库 $Repository" 'PASS' 'agent 账号可读'
         } else {
-            Add-Row "仓库 $Repository" 'FAIL' $repoCheck
+            Add-Row "agent 仓库 $Repository" 'FAIL' $repoCheck
         }
     }
 } else {
