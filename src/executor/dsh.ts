@@ -368,6 +368,16 @@ export class DshExecutor implements Executor {
       this.left.get(ticket.id)?.collect.abort(); this.left.delete(ticket.id); this.personal.delete(ticket.id)
     })
   }
+  // [fork] 人接管：只取消当前回合，且 keepInbox:true——Session、执行目录、inbox、后台工作与派工都留着。
+  /**
+   * Interrupts the turn a ticket's worker is in, for a person who takes the work over: the Session, its Inbox with what waits
+   * in it, the ticket's directory and its background work stay, so the worker waits for what reaches it next.
+   */
+  interrupt(ticket: Ticket, _assignment: Assignment): void {
+    const sessionId = workerSessionId(ticket.id)
+    // After the commit, as `stop` does: a rollback leaves the worker working where it was.
+    this.host.store.afterCommit(() => { this.host.context.agents.get(sessionId as SessionId)?.cancel({ kind: 'user' }, { keepInbox: true }) })
+  }
   /** Stop what a ticket's worker runs in the background (see `stopBackground`). */
   private stopWork(ticketId: string, reason: string, keepInbox = false): void {
     this.track(ticketId, stopBackground(this.host.context, workerSessionId(ticketId), reason, keepInbox))

@@ -15,6 +15,8 @@ export const USER_ERRORS = {
   ticketStopped: ['refused', 'A person stopped this ticket; new work needs an accept through orchestrator_route'],
   mandateRevoked: ['refused', 'The current policy no longer holds this ticket\'s mandate; new work needs an accept through orchestrator_route'],
   notRetryable: ['refused', 'Only an open ticket can be retried, and only when its worker last reported failed or blocked and no person has sent a message since, or when delivering an Input to its worker failed'],
+  // [fork] 人接管时工单空闲（没有在跑的回合）要明确拒绝，不能静默成功。
+  nothingToInterrupt: ['refused', 'Nothing to interrupt: the ticket runs no turn now, so its worker is not working on anything a person could take over'],
   sourceThread: ['refused', 'This is the thread the ticket started on; it stays subscribed'],
   followedThread: ['refused', 'This thread is the ticket\'s own, such as its pull request\'s; it stays subscribed'],
   notFollowing: ['refused', 'This ticket does not follow that thread'],

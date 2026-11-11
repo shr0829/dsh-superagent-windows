@@ -44,5 +44,7 @@ jobs:
               fi
             # 占位符 <...> 和 http/mailto/纯锚点不是本地文件，在这里滤掉
             done < <(grep -oE '\]\([^)]+\)' "$file" | sed -E 's/^\]\(//; s/\)$//' | grep -vE '^(https?:|#|mailto:|<)' || true)
-          done < <(find . -name '*.md' -not -path './upstream/*' -print0)
+          done < <(find . -name '*.md' -not -path './upstream/*' -not -path './docs/upstream/*' -print0)
+          # docs/upstream/ 是上游文档的冻结快照（tests/docs.spec.ts 拿它校验模块表与测试表），
+          # 里面指向 001-domain.md 之类的交叉链接指向本仓库不携带的文件，链接检查对它们没有意义。
           exit $fail

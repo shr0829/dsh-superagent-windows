@@ -1,7 +1,7 @@
 import { execFile, spawn } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SENSITIVE_ENV_PATTERN, type SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
@@ -14,6 +14,9 @@ import { gitEnv } from './fixtures/git.ts'
 // Git and shell subprocesses can exceed the 5s default timeout when the test suite runs in parallel.
 vi.setConfig({ testTimeout: 30_000 })
 const exec = promisify(execFile)
+// The shims this module writes are `#!/bin/sh` scripts, which Windows cannot execute; the tests that would run one
+// assert what the shim was written to do instead. See docs/01-windows-deltas.md.
+const windows = process.platform === 'win32'
 let dir: string
 const program = (path: string, body: string): string => { writeFileSync(path, `#!/bin/sh\n${body}\n`); chmodSync(path, 0o755); return path }
 /** Worker shell environment after DSH strips credential-shaped variables. */
@@ -28,6 +31,13 @@ describe('worker shims', () => {
     const wrapper = program(join(dir, 'gh-agent'), `GH_CONFIG_DIR=${dir}/agent-config exec gh "$@"`)
     await writeEnvironment(testDeployment({ stateDir: dir, github: { ...testDeployment().github, cli: wrapper }, feishu: undefined }), [])
     const bin = workerBin(dir)
+    if (windows) {
+      // Windows cannot run the `#!/bin/sh` shim, so assert what it was written to do: strip its own directory from PATH, then exec the wrapper.
+      const shim = readFileSync(join(bin, 'gh'), 'utf8')
+      expect(shim).toContain('[ "$entry" = "$self" ]')
+      expect(shim).toContain(`exec '${wrapper}' "$@"`)
+      return
+    }
     const path = [bin, join(dir, 'venv'), join(dir, 'real'), '/usr/bin', '/bin'].join(':')
     const { stdout } = await exec('gh', ['api', 'user'], { env: { PATH: path }, timeout: 10_000 })
     expect(JSON.parse(stdout)).toEqual({ login: 'agent-bot', config: `${dir}/agent-config`, path: [join(dir, 'venv'), join(dir, 'real'), '/usr/bin', '/bin'].join(':') })
@@ -35,6 +45,12 @@ describe('worker shims', () => {
   it('make `lark-cli` fail without a Feishu bot and each blocked command fail with the agent\'s login', async () => {
     await writeEnvironment(testDeployment({ stateDir: dir, feishu: undefined }), ['personal-gh'])
     const bin = workerBin(dir)
+    if (windows) {
+      // Windows cannot run the `#!/bin/sh` shims, so assert the diagnostics they were written to print.
+      expect(readFileSync(join(bin, 'lark-cli'), 'utf8')).toContain("echo 'lark-cli is unavailable: this installation has no Feishu bot.' >&2")
+      expect(readFileSync(join(bin, 'personal-gh'), 'utf8')).toContain("echo 'personal-gh is blocked in this installation; use gh, which acts as agent-bot.' >&2")
+      return
+    }
     await expect(exec(join(bin, 'lark-cli'), ['im', '+chat-list'])).rejects.toMatchObject({ code: 1, stderr: 'lark-cli is unavailable: this installation has no Feishu bot.\n' })
     await expect(exec(join(bin, 'personal-gh'), [])).rejects.toMatchObject({ code: 1, stderr: 'personal-gh is blocked in this installation; use gh, which acts as agent-bot.\n' })
   })
@@ -43,6 +59,13 @@ describe('worker shims', () => {
     const base = testDeployment()
     await writeEnvironment(testDeployment({ stateDir: dir, github: { ...base.github, cli: gh }, feishu: { ...base.feishu!, cli: lark } }), ['gh', 'git', 'lark-cli'])
     const bin = workerBin(dir)
+    if (windows) {
+      // Windows cannot run the `#!/bin/sh` shims, so assert that each one execs the CLI the configuration names.
+      expect(readFileSync(join(bin, 'gh'), 'utf8')).toContain(`exec '${gh}' "$@"`)
+      expect(readFileSync(join(bin, 'lark-cli'), 'utf8')).toContain(`exec '${lark}' "$@"`)
+      expect(readdirSync(bin)).not.toContain('git')
+      return
+    }
     expect([(await exec(join(bin, 'gh'), ['api', 'user'])).stdout, (await exec(join(bin, 'lark-cli'), ['im'])).stdout]).toEqual(['gh api user\n', 'lark im\n'])
     expect(readdirSync(bin)).not.toContain('git')
   })
@@ -54,9 +77,10 @@ describe('worker shims', () => {
     writeFileSync(join(workerBin(dir), 'notes'), `notes\nmore\n${readFileSync(join(workerBin(dir), 'gh'), 'utf8').split('\n')[1]}\n`)
     await expect(writeEnvironment(testDeployment({ stateDir: dir }), [])).rejects.toThrow(`${join(workerBin(dir), 'notes')} was not written by dsh-superagent`)
     rmSync(join(workerBin(dir), 'notes'))
-    symlinkSync(join(workerBin(dir), 'gh'), join(workerBin(dir), 'link'))
+    // A symbolic link to a shim, or on Windows (where that needs a privilege) a directory in its place, is refused as well: neither is a regular file.
+    if (windows) mkdirSync(join(workerBin(dir), 'link')); else symlinkSync(join(workerBin(dir), 'gh'), join(workerBin(dir), 'link'))
     await expect(writeEnvironment(testDeployment({ stateDir: dir }), [])).rejects.toThrow('link was not written by dsh-superagent')
-    rmSync(join(workerBin(dir), 'link'))
+    rmSync(join(workerBin(dir), 'link'), { recursive: true, force: true })
     writeFileSync(workerGitConfig(dir), '[user]\n\tname = someone\n')
     await expect(writeEnvironment(testDeployment({ stateDir: dir }), [])).rejects.toThrow(`${workerGitConfig(dir)} was not written by dsh-superagent`)
     expect(readFileSync(workerGitConfig(dir), 'utf8')).toBe('[user]\n\tname = someone\n')
@@ -84,7 +108,9 @@ describe('agent git configuration', () => {
     await git('init', '-q', 'repo')
     await exec('git', ['-C', 'repo', 'remote', 'add', 'origin', 'git@github.com:acme/widgets.git'], { cwd: dir, env })
     expect(await git('-C', 'repo', 'remote', 'get-url', '--push', 'origin')).toBe('https://github.com/acme/widgets.git')
-    expect(await git('config', '--show-origin', '--get-all', 'credential.https://github.com.helper')).toBe(`file:${workerGitConfig(dir)}\t${credentialHelper('/opt/agent tools/gh')}`)
+    // git quotes a path in `--show-origin` output when it contains characters it cannot print plainly (Windows backslashes do).
+    const origin = (line: string): string => { const [at, ...rest] = line.split('\t'); return [at!.replace(/^file:"(.*)"$/, (_, file: string) => `file:${file.replace(/\\(.)/g, '$1')}`), ...rest].join('\t') }
+    expect(origin(await git('config', '--show-origin', '--get-all', 'credential.https://github.com.helper'))).toBe(`file:${workerGitConfig(dir)}\t${credentialHelper('/opt/agent tools/gh')}`)
     expect(await git('config', '--get-all', 'credential.helper')).toBe('')
     await expect(git('config', 'commit.gpgsign')).rejects.toThrow()
     await expect(git('config', 'core.abbrev')).rejects.toThrow()
@@ -113,9 +139,10 @@ it('fails instead of asking the operator\'s askpass helpers when the agent\'s cr
 
 it('removes every spelling of a directory from PATH and keeps the other entries', () => {
   mkdirSync(join(dir, 'state', 'worker-bin'), { recursive: true })
-  symlinkSync(join(dir, 'state'), join(dir, 'link'))
+  // A junction needs no privilege on Windows, where a directory symlink does.
+  symlinkSync(join(dir, 'state'), join(dir, 'link'), windows ? 'junction' : 'dir')
   const bin = join(dir, 'state', 'worker-bin')
-  expect(withoutDirectory([`${bin}/`, join(dir, 'link', 'worker-bin'), '/usr/bin', 'node_modules/.bin'].join(':'), bin)).toBe('/usr/bin:node_modules/.bin')
+  expect(withoutDirectory([`${bin}/`, join(dir, 'link', 'worker-bin'), '/usr/bin', 'node_modules/.bin'].join(delimiter), bin)).toBe(['/usr/bin', 'node_modules/.bin'].join(delimiter))
 })
 
 /** Minimal SubprocessRuntime backed by child_process.spawn with an isolated global git config. */
@@ -154,7 +181,8 @@ describe('ticket directory check', () => {
     await expect(check('repo')).rejects.toThrow(/bad config/)
   })
   it('reports a failed command\'s exit status', async () => {
-    const failing = ['sh', '-c', 'echo nope >&2; exit 3']
+    // A worker command that fails: `sh -c` on POSIX, the same script through node where Windows has no `sh`.
+    const failing = windows ? [process.execPath, '-e', "process.stderr.write('nope\\n'); process.exit(3)"] : ['sh', '-c', 'echo nope >&2; exit 3']
     const error = await runAsWorker(subprocess(join(dir, 'global')), failing, dir, signal).catch((e: unknown) => e)
     expect(error).toBeInstanceOf(CliError)
     expect(error).toMatchObject({ message: 'nope', exitCode: 3 })

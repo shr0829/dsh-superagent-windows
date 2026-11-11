@@ -8,6 +8,7 @@ import { feishuRef } from '../sources/feishu.ts'
 import { feishuTriggerId } from '../sources/feishu-trigger.ts'
 import { ASSIGNMENTS, INPUTS, assignmentLine, decisionCard, decisionDetails, inputLine, newestPage, preview, textPage, threadCard, ticketCard,
   ticketDetails, triggerCard, type TicketThread } from './cards.ts'
+import { linksOf } from './recall.ts'
 import { threadTitle } from './views/records.ts'
 import { transcriptEntry } from './context.ts'
 import { builtInParts, defaultPrompts } from './prompts.ts'
@@ -25,9 +26,10 @@ export const RESOURCES: readonly { name: string; holds: string; executor?: true 
   { name: 'tickets', holds: 'ticket cards, newest first; a card\'s state is person/review after a ready report, person/blocked or person/failed after those reports, person/answer with a question, person/delivery when an input could not reach the worker, working or working/queued while it works, idle once the worker ended its turn without a report, else how the ticket ended' },
   { name: 'triggers', holds: 'trigger cards with where each went, newest first' },
   { name: 'threads', holds: 'subscribed threads, newest activity first, with their labels, tickets, current assessment and polling errors' },
-  { name: 'thread/<key>', holds: 'one thread: its label and link, its tickets and latest decisions, and its triggers, newest first', executor: true },
+  { name: 'thread/<key>', holds: 'one thread: its label and link, its tickets and latest decisions, its triggers newest first, '
+    + 'and the links to those tickets and decisions', executor: true },
   { name: 'decisions', holds: 'decisions, newest first' },
-  { name: 'decision/<id>', holds: 'one decision with its audit' },
+  { name: 'decision/<id>', holds: 'one decision with its audit, and the links to its thread, ticket and triggers' },
   { name: 'ticket/<id>', holds: 'a ticket\'s card, the trigger, decision and threads it is tied to, its latest assignments with the start of each '
     + 'report, and its inputs, newest first', executor: true },
   { name: 'ticket/<id>/assignment', holds: 'its assignment text', executor: true },
@@ -38,8 +40,8 @@ export const RESOURCES: readonly { name: string; holds: string; executor?: true 
   { name: 'ticket/<id>/transcript', holds: 'its Executor Session\'s messages, newest first', executor: true },
   { name: 'ticket/<id>/message/<n>', holds: 'one message of that transcript', executor: true },
   { name: 'ticket/<id>/input/<id>', holds: 'one input it was delivered', executor: true },
-  { name: 'trigger/<id>', holds: 'a trigger\'s text, where it went, the message it replies to and the messages around it on its thread',
-    executor: true },
+  { name: 'trigger/<id>', holds: 'a trigger\'s text, where it went, the message it replies to and the messages around it on its thread, '
+    + 'and the links to the thread, Decision, ticket and neighbour it leads to', executor: true },
   { name: 'settings', holds: 'settings by block, each with the revision a save names: the small blocks whole, the Policy and the Source '
     + 'instances summarized' },
   { name: 'settings/<block>', holds: 'one settings block whole, as orchestrator_settings_save takes it: policy, eval, executor, pause or '
@@ -141,17 +143,27 @@ const ROUTES: readonly Route[] = [
     const { store } = host
     const { read: _read, tickets: ids, ...card } = threadCard(thread, threadTitle(store, thread))
     const page = list(read, (offset, count) => store.read.threadPage(thread.key, offset, count).map(triggerLine))
+    // The tickets and decisions this thread leads to, so a reader expands from the thread instead of loading them all.
+    const links = linksOf([
+      ...(ticketId ? [ticketId] : ids).map(id => ['ticket', `ticket/${id}`] as const),
+      ...ticketId ? [] : store.decisions.byThread(thread.key).slice(-THREAD_DECISIONS).reverse()
+        .map(decision => ['decision', `decision/${decision.id}`] as const),
+    ])
     // Worker sessions cannot inspect other tickets or decisions on a shared thread.
-    if (ticketId) return { ...card, ...page }
+    if (ticketId) return { ...card, ...links, ...page }
     const tickets = ids.flatMap(id => { const found = store.tickets.get(id); return found ? [ticketCard(found)] : [] })
     const decisions = store.decisions.byThread(thread.key).slice(-THREAD_DECISIONS).reverse().map(decisionCard)
-    return { ...card, tickets, decisions, ...page }
+    return { ...card, ...links, tickets, decisions, ...page }
   }],
   ['decisions', read => list(read, (offset, count) => main(read).store.read.recentDecisions(offset, count).map(decisionCard))],
   ['decision/', read => {
     const decision = main(read).store.decisions.get(read.rest)
     if (!decision) throw new Error('Unknown decision')
-    return decisionDetails(decision)
+    return { ...decisionDetails(decision), ...linksOf([
+      ['thread', `thread/${decision.threadKey}`],
+      ['ticket', decision.ticketId && `ticket/${decision.ticketId}`],
+      ...decision.triggerIds.map(id => ['trigger', `trigger/${id}`] as const),
+    ]) }
   }],
   ['settings', read => main(read).settings.view()],
   ['settings/', read => text(read, JSON.stringify(main(read).settings.block(read.rest)))],
@@ -225,6 +237,14 @@ const ROUTES: readonly Route[] = [
     const neighbours = host.store.read.neighbours(threadKey(found.threads[0]!), found.at, found.id)
     const around = { before: shown(neighbours.before), after: shown(neighbours.after) }
     return { ...card, ...await host.sourceLink(found, signal), acknowledgement: host.store.replyStatus(key('ack', found.id)) ?? 'not_requested',
+      ...linksOf([
+        ['thread', `thread/${threadKey(found.threads[0]!)}`],
+        ['decision', visible?.decisionId && `decision/${visible.decisionId}`],
+        ['ticket', visible?.fanout[0] && `ticket/${visible.fanout[0]}`],
+        ['replied_to', repliedTo && `trigger/${repliedTo.id}`],
+        ['around_before', around.before && `trigger/${around.before.id}`],
+        ['around_after', around.after && `trigger/${around.after.id}`],
+      ]),
       ...(ref ? { context: feishuReferences(ref) } : {}),
       ...(offset === 0 ? {
         ...repliedTo ? { replied_to: triggerLine(repliedTo) } : {},
@@ -249,6 +269,8 @@ const ROUTES: readonly Route[] = [
         ({ thread: key, ...context ? { context: true } : {}, ...bound.has(key) ? { bound: true } : {} })
       const threads = [...subscribed.map(thread => marked(thread.key, !!thread.context?.includes(id))),
         ...[...bound].filter(key => !subscribed.some(thread => thread.key === key)).map(key => marked(key, false))]
+      // A ticket's own projection already names its trigger, Decision and threads by id next to the read paths of its parts,
+      // so it adds no links: the detail stays under the size a model can read in one page.
       return { ...ticketDetails(ticket, threads, batchOf(host, ticket), !!ticketId), ...retry }
     }
     if (section === 'assignments' || section === 'inputs') {

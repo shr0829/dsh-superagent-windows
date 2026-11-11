@@ -24,6 +24,11 @@ export interface SourceHost {
   readonly sources: SourceRegistry
   /** Returns the context for one Source kind; its `report` writes only the health entries declared by the kind. */
   context(kind: { kind: string; health: readonly string[] }): SourceContext
+  /**
+   * Writes `part` as Source `id`'s Policy section when the Policy has none for it yet, and leaves an existing one alone.
+   * A Source that has no external roster (the chat channel) records its sender this way, once, instead of by polling.
+   */
+  ensurePolicy(id: string, part: Record<string, unknown>): Promise<void>
 }
 /** Display label, URL, and facts (`null` removes a fact) that a Source publishes on a Thread. */
 export interface ThreadDescription { label?: string; url?: string; facts?: Record<string, ThreadFact | null> }
@@ -61,6 +66,13 @@ export interface SourceContext {
   }
   triggers: { get(id: string): Trigger | undefined; /** The newest Trigger on a Thread. */ latest(thread: string): Trigger | undefined }
   notify(message: OutboundMessage): void
+  /**
+   * Delivers `text` into Session `session` under `requestId`, at most once across restarts: `'gone'` when the Session no
+   * longer exists, and a rejection when delivery failed and a later retry can still succeed.
+   */
+  deliver(session: string, requestId: string, text: string, mode: 'queue' | 'steer' | { inject: string }): Promise<'sent' | 'gone'>
+  /** Whether the orchestrator owns `session`, as its main Session or one of its workers; a Source must not treat those as people. */
+  owns(session: string): boolean
   /** Reports the state of one of this kind's declared health entries; throws for undeclared entry names. */
   report(entry: string, health: Health): void
 }

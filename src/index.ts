@@ -5,7 +5,9 @@ import { Runtime } from './app/runtime.ts'
 import { Config, machineOf, type DeploymentConfig } from './deployment.ts'
 
 export const name = 'dsh-superagent'
-export const inject = ['agents', 'sessionController', 'sessionPersistence', 'workspaceRegistry', 'permissionPresets', 'tools', 'systemPrompt', 'skills', 'webServer', 'llm', 'subprocess']
+// [fork] `workspaceRegistry` is not injected: Sessions are created at a `cwd` and join no Workspace, so DSH's workspace
+// list does not grow by one entry per ticket. The Orchestrator panel lists the main Session and its tickets itself.
+export const inject = ['agents', 'sessionController', 'sessionPersistence', 'permissionPresets', 'tools', 'systemPrompt', 'skills', 'webServer', 'llm', 'subprocess']
 export { Config }
 export async function apply(ctx: Context, config: DeploymentConfig): Promise<void> {
   const machine = machineOf(config)

@@ -249,7 +249,9 @@ it('lists in the same order in SQLite and in memory, and undoes a failed nested 
 it('creates the state directory for its owner alone, and the database readable by its owner alone', () => {
   const path = join(directory, 'state', 'orchestrator.sqlite')
   new Store(path).close()
-  expect([statSync(dirname(path)).mode & 0o777, statSync(path).mode & 0o777]).toEqual([0o700, 0o600])
+  expect([statSync(dirname(path)).isDirectory(), statSync(path).isFile()]).toEqual([true, true])
+  // Windows has no POSIX mode bits: ACLs come from the parent directory.
+  if (process.platform !== 'win32') expect([statSync(dirname(path)).mode & 0o777, statSync(path).mode & 0o777]).toEqual([0o700, 0o600])
 })
 
 it('reads `%` and `_` in a key prefix and a search query as written, not as patterns', () => {

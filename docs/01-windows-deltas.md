@@ -69,7 +69,16 @@ Windows：没有 tmux；`Start-Process` 起的进程不受 RDP/SSH 断线影响�
 
 **其二，prepare 命令仍按 POSIX 语义执行。** `src/executor/dsh.ts:254` 固定拼 `['sh','-c',command]`，面板文案写"用 sh 运行一次"（`src/client/locales.ts:376`），`docs/003-execution.md:51` 写明 "runs once with `sh`"。所以 `config/prepare-worktree.ps1` 是 PowerShell 写的，实际调用方式是让 `sh` 去起它：`powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "C:\...\config\prepare-worktree.ps1"`，前提是 Git for Windows 的 `sh.exe` 在 PATH 上。由此得到两条约束：prepare 命令行本身必须是 sh 能解析的单行（路径全加引号），脚本内部才用 PowerShell 语法。
 
-`blockedCommands` 受影响更直接：拦截的实现是把 `worker-bin` 前置到 PATH（`src/infra/environment.ts:120`），而 shim 的内容是 `#!/bin/sh` 脚本（:89），gh / lark-cli / 被拦命令三者的 shim 都这么写（:100-104）。Windows 上 `#!/bin/sh` 不可执行，拦截会静默失效——不报错，只是不生效（据上游实现推断：`environment.ts:89` 写死 shebang 与 `mode: 0o755`，Windows 的 CreateProcess 不看这两样）。
+`blockedCommands` 受影响更直接：拦截的实现是把 `worker-bin` 前置到 PATH（`src/infra/environment.ts:120`），而 shim 的内容是 `#!/bin/sh` 脚本（:89），gh / lark-cli / 被拦命令三者的 shim 都这么写（:100-104）。
+
+**这条已经不是"推断"，是确认失效。** 两个独立原因，任何一个都足以让它不生效：
+
+1. `environment.ts:89` 写的是 `#!/bin/sh` + `mode: 0o755`，Windows 的 CreateProcess 不看 shebang 也不看 POSIX 权限位；`worker-bin` 里没有 `gh.exe` / `gh.cmd`，所以 PATH 上的 `gh` 命中的是系统里那个真的 `gh`。
+2. `environment.ts:93-98` 剥 PATH 用 `IFS=:` 的 sh 循环，`:120` 拼 PATH 用的是 node 的 `delimiter`（Windows 上 `;`）。同一个仓库里两种分隔符口径，Windows 上永远剥不干净，即使 shim 能执行也会漏。
+
+`src/deployment.ts:73-76` 的 `workerProbe` 与 `:120` 的飞书探测同样把 `env` 当 argv[0]（`['env','PATH=…', …]`），Windows 没有 `env` 这个程序——这两条探测在真实启动时会失败，在测试里靠注入的 `probe` 掩盖了。
+
+要让隔离在 Windows 上真的成立，需要：把 shim 改成 `.cmd`（同 §5 的 `new-agent-cli.ps1` 思路）、剥 PATH 走 `delimiter`、探测不用 `env` 前缀。这是运行时行为改动，还没做。
 
 ## 5 账户包装器与凭据隔离
 
@@ -100,6 +109,22 @@ Windows 上的两个坑：
 
 - 空格。PATH 项里有空格，`[workerBin, path].join(delimiter)` 拼出来的串在 cmd 与部分 CLI 的 argv 处理下会断，表现是 `gh` / `lark-cli` 找不到或参数错位。`install.ps1` 因此直接拒绝：非绝对路径 throw（:75），含空白 throw（:76）；`doctor.ps1` 对同样的条件给 WARN（:145-149）。默认值是 `%USERPROFILE%\.dsh\state\<profile>`（`install.ps1:47`），用户名含空格时这个默认值会被拒绝，必须显式传 `-StateDir`。
 - 长路径。Ticket 目录下会生成 `work/<ticket>/...` 与 `git worktree` 的路径，超过 260 字符时 git 与 node 的行为不一致。要求 `git config --global core.longpaths true`，`doctor.ps1` 检查并给 WARN（:79-83）。
+
+### 6.1 绝对路径校验（`[fork]` 已改）
+
+上游 `src/deployment.ts:16` 的 `absolute()` 只认 `/^\//`。本仓库发布用的样板 `config/profile.cordis.patch.yml:24` 写的是
+`stateDir: 'C:/Users/CHANGE_ME/.dsh/state/superagent'`——按上游正则这是"相对路径"，配置直接拒绝加载，Windows 部署走不通第一步。
+现在改成 `[fork]` 版：
+
+```ts
+const absolute = (value: string) => /^(\/|[A-Za-z]:[\\/]|\\\\)/.test(value)
+```
+
+覆盖 POSIX 绝对路径、盘符路径与 UNC 路径。行上方有 `[fork]` 注释写原因。
+
+**同类还有一处没改**：`src/policy.ts:94` 的 `directory` 字段
+（`path === '' || path.startsWith('/')`）只接受 `/` 开头的值，Windows 下 `<stateDir>/work` 是 `C:/…`，会被拒。
+默认值是 `''`（= `<stateDir>/work`），所以只在显式配置目录时才踩到。等执行侧的工作目录约定定下来一起动，避免改两次。
 
 ## 7 编码与 PowerShell 版本
 
@@ -152,6 +177,18 @@ Windows 上按同一顺序，命令换成脚本：
 
 回滚的关键约束：数据库被新版本迁移后旧版本打不开（`docs/006-deployment.md:242`）。所以回滚必须先停服务、再用备份覆盖数据库，光把 lock 文件改回旧 commit 不够——代码回去了，schema 没回去。
 
+## 13 状态目录与数据库的权限
+
+上游用 POSIX 权限位保护状态：`src/app/store.ts:59` 建目录带 `mode: 0o700`，`:63` 对 sqlite 文件 `chmodSync(path, 0o600)`，
+`src/app/runtime.ts:91` 同样建目录 0o700。库里放的是会话、凭据引用与执行记录，所以"仅属主可读写"是安全边界的一部分，不是卫生习惯。
+
+Windows 上这两句都是空操作。实测 `statSync(...).mode & 0o777` 目录与文件都是 `0o666`——NTFS 的权限由安全描述符决定，
+node 的 `mode` 只影响只读位。实际权限来自父目录 ACL 继承，也就是说 `<stateDir>` 落在谁的目录下，就继承谁的权限。
+
+这意味着 **Windows 部署上"库文件仅属主可读"这条意图没有生效**。要补就得显式设置 ACL（`icacls <path> /inheritance:r /grant:r "<user>:(F)"`），
+加在哪一层（`install.ps1` 建目录时、还是每次 `Store` 打开时）取决于是否允许用户自定义 `stateDir` 的权限模型。
+本轮只记录，未改代码：`store.spec.ts` 现在只在非 win32 断权限位，Windows 侧断"目录与文件都存在"。
+
 ## 未验证项
 
 以下没有在本机跑过，不要当成已验证：
@@ -161,8 +198,101 @@ Windows 上按同一顺序，命令换成脚本：
 - 计划任务在锁屏、睡眠跨过触发点后的补跑：`-StartWhenAvailable` 对"每 60 分钟重复"触发的行为、错过的多次触发是否合并成一次。
 - `AtLogOn` 在无交互登录（仅 RDP 断开、锁屏）状态下是否执行。
 - prepare 经 `sh` 调 `powershell.exe` 的实际行为：单行引号、路径含空格、`$LASTEXITCODE` 能否透传给上游的执行器。
-- `blockedCommands` 的 `#!/bin/sh` shim 在 Windows 上失效后的具体后果（是否真的静默跳过、有没有可观察的报错）。
+- `blockedCommands` 的 `#!/bin/sh` shim 在 Windows 上失效后的具体后果（是否真的静默跳过、有没有可观察的报错）。已确认失效（§4），但"用户会不会察觉"没验证过：拦截一个命令后，`gh` 仍能照常访问，且没有任何日志。
 - `gh` 2.48+ 通过 `.cmd` 包装器读 `GH_CONFIG_DIR` 的行为：`doctor.ps1` 只验证 `api user` 能返回 agent 账号，未验证 push、PR 凭据在 `worker-gitconfig` 下的组合。
 - 真实 GitHub Issue → Ticket → 执行 → 回写的端到端链路；飞书 Source（本机未装 `lark-cli`）。
 - `stateDir` 含空格时的运行时行为：`install.ps1` 直接拒绝，因此这条路径没有被测过。
 - `core.longpaths` 在 `git worktree` 与 node `fs` 混合场景下的实际边界。
+- 真实 `start` 时的 setup 探测：`workerProbe` 与飞书探测都以 `env` 为 argv[0]（§4），按代码必然在 Windows 上失败，但本机没装 profile，没跑过一次真实启动去确认失败长什么样。
+- 飞书实时事件消费在 Windows 上未跑过（本机没有 `lark-cli`）；按 `feishu-loops.ts:71` 的 `spawn` 形式预计 ENOENT，轮询补拉那条不 spawn CLI，预计正常。
+- `scripts/dsh-superagent.ps1` 的行为契约：profile 锁、Ctrl+C 优雅停止、日志保留 20 份、退出码 0/1/2/3 只在 `doctor.ps1` 与人工操作里验证过，没有自动化断言（对应的 POSIX spec 已整组跳过，见 `docs/06-test-baseline.md`）。
+
+
+## 14 插件在 Windows 上启动期的四个缺口
+
+这一节记的是"上游代码在 Windows 上装起来之后才暴露"的问题，不是平台偏好。前两个已按 `[fork]` 修掉，后两个是剩余项。
+
+### 14.1 主 Session 的工具白名单写死 `bash`
+
+`src/app/sessions.ts` 恢复 Orchestrator 主会话时调用 `tools.restrict()`，名单写死
+`['skill','bash','read','read_image','job_output','job_list','job_kill']`。Windows profile 里没有 `bash` 这个全局工具，
+restrict 直接抛 `RemoteError: resume failed for session "orchestrator-…": tools.restrict() names unknown global tool "bash"`，
+插件因此不激活，`/orchestrator/api/*` 全部 404——面板能打开，但每个请求都失败。
+
+`[fork]` 改成 `MAIN_TOOLS = ['skill','bash','pwsh','read','read_image','job_output','job_list','job_kill']`，
+再用 `agent.ctx.tools.get(name, scopeParentOf(agent))` 过滤掉本 profile 不存在的工具；`noWait` 的 shell 分支同时认 `bash` 与 `pwsh`。
+
+### 14.2 探测 worker 环境时以 `env` 为 argv[0]
+
+`src/deployment.ts` 的 `workerProbe` 原来拼 `runAsWorker(subprocess, ['env', 'PATH=…', ...argv])`。Windows 没有 `env`，
+保存 Source 时报 `spawn env ENOENT`，界面上表现为 `agentCliSignedOut`——错误码指向账号，实际是缺一个可执行文件。
+
+`[fork]` 改成把 PATH 放进 `runAsWorker` 的 env 参数（`{ ...process.env, PATH: path }`），argv 原样传。
+`tests/runtime.spec.ts:852-856` 相应改成断言 `argv[0]` 是 CLI 本身、PATH 里没有 worker-bin。
+
+### 14.3 `proper-lockfile` 的残留锁
+
+硬杀进程（任务管理器、`Stop-Process`）后 `%USERPROFILE%\.dsh\state\<profile>.lock` 会留下，
+下次启动 `dsh-superagent` 抛出 `Lock file is already being held` 并拒绝启动（`proper-lockfile@4.1.2`，重试次数耗完即抛）。
+`scripts\watchdog.ps1` 与计划任务看不到这一类失败——进程起来了、日志为空、健康检查超时。
+
+绕法：删掉锁目录再启动。要不要在 `dsh-superagent.ps1 start` 里加"锁存在但没人持有就清掉"的判断，待定：
+判断错会制造双实例，比启动失败更糟。
+
+### 14.4 进程识别与 `.cmd` / 无扩展名的 spawn
+
+两个独立问题：
+
+- `Get-ServiceProcesses` 靠命令行匹配找服务进程，而 3082 上的真实进程是 `DeepSeek Harness.exe --profile … --no-open`，
+  经 `cmd /d /c` 包一层之后匹配不到。结果是 `start` 认不出已在跑的实例，`stop` 杀不干净，
+  下一次启动撞上 `listen EADDRINUSE: address already in use 127.0.0.1:3082`，并在启动日志里表现为
+  `2 required plugins did not activate`（`webserver` 与挂在它后面的 `dsh-superagent`、`dsh-superagent-github`）。
+- Node 的 `spawn` 不解析 `.cmd`，也不执行只有 shebang 的无扩展名脚本。因此把 Source 的 `cli` 设成 `gh-agent.cmd` 会 ENOENT；
+  `src/sources/feishu-loops.ts:71` 直接 spawn `lark-cli` 在 Windows 上同样起不来。GitHub Source 填 `.exe` 的绝对路径可用。
+
+### 14.5 单账号机器上收不到自己产生的事件
+
+`src/sources/github.ts:227` 的 `if (sameName(item.user.login, login)) continue` 会跳过智能体账号自己产生的
+Issue、PR 与评论。这是设计（智能体不该把自己的动作当成新工作），但它意味着：本机只登录了一个 GitHub 账号时，
+用这个账号造 Issue/评论不会产生 trigger。演示与自测要么用第二个账号留言，要么走"人直接跟 Router 对话"这条路。
+用 GitHub Actions 以 `github-actions[bot]` 身份评论可以产生 trigger，但 bot 的 trigger 会在决策阶段被判
+`not_human`（`strength: inferred`），不会开单——这正好是 `src/sources/kind.ts:57` 那条规则在运行时的样子。
+
+## 15 Desktop profile 只能由 Electron 应用启动
+
+`dsh --profile desktop --dump-config` 会报 `profile "desktop" is managed exclusively by the Electron application`；
+`dsh plugin --profile desktop add|install` 仍然可用（它只动 `package.json` 与 `node_modules` 链接）。所以验证桌面端是否
+加载了插件，不能靠 `--dump-config`，只能看三处：`%USERPROFILE%\.dsh\profiles\desktop\package.json` 里的
+`link:E:\project\08-SuperAgent-Windows`、`node_modules\dsh-superagent` junction 是否有效（`valid=True`）、
+`cordis.patch.yml` 里是否有 `- id: dsh-superagent` 与它的 `stateDir`。改完插件源码后必须重启桌面应用——热重载不会重读
+profile 与插件的 `cordis.patch.yml`。
+
+另一个本机坑：`dsh plugin add` 会先解析该 profile 已声明的所有 bundle。本机 desktop profile 的 `dsh-llm-wiki` 曾是指向
+已删除目录的失效 junction，导致报 `cannot resolve profile bundle "dsh-llm-wiki"`；`dsh plugin --profile desktop install`
+按 `package.json` 的 `link:E:/project/07-个人知识库/dsh-plugin` 重新链接后恢复。
+
+## 16 插件改写的是 DSH 自己的进程环境
+
+`applyEnvironment`（`src/infra/environment.ts`）不是给子进程传一份 env，而是直接改 `process.env`：把
+`<stateDir>/worker-bin` 插到 PATH 最前，并写 `GIT_CONFIG_GLOBAL=<stateDir>/worker-gitconfig`、`GIT_CONFIG_NOSYSTEM=1`、
+`GIT_ASKPASS=''`、`GIT_TERMINAL_PROMPT=0`、作者身份等。这在 Linux 的独立跑法里没问题，在 Windows 桌面端上有一个副作用：
+
+- 插件是装在 `desktop` profile 里的，所以**整个 Electron 应用进程**都被改了；此后它 spawn 的任何东西——
+  agent 的 `pwsh` 工具、`job_*` 后台任务、面板里的终端——都继承这份环境。
+- 实测：本机桌面端加载插件后，agent 自己的 pwsh 会话里 `GIT_CONFIG_GLOBAL` 指向
+  `C:\Users\s1215\.dsh\state\superagent-desktop\worker-gitconfig`，PATH 首位是同一个 stateDir 下的 `worker-bin`。
+  于是 `git commit` 会读到 worker 的 `useConfigOnly = true`（人自己提交时报 `no email was given`），
+  PATH 上还挂着一个 Windows 执行不了的 `gh` shebang shim（按 PATHEXT 解析，实际仍落到后面的 `gh.exe`，不会跑错，但很容易误判）。
+- 只要插件在跑，这份改写就一直在；`stop()` 才还原（`applyEnvironment` 返回的还原函数）。
+
+影响与处理：
+
+1. **测试**：`tests/runtime.spec.ts` 里"环境被还原"的断言在这样一台机器上必挂。spec 现在在 `beforeEach` 清掉
+   `GIT_CONFIG_GLOBAL/GIT_CONFIG_NOSYSTEM/GIT_ASKPASS/GIT_TERMINAL_PROMPT/GIT_AUTHOR_NAME/GIT_AUTHOR_EMAIL/GIT_COMMITTER_NAME/GIT_COMMITTER_EMAIL`，
+   `afterAll` 还回去，断言对齐"从没跑过插件的机器"。CI 上本来就没有这些变量，行为不变。
+2. **人的终端**：在桌面端里开 shell 干活时，先 `Remove-Item Env:GIT_CONFIG_GLOBAL, Env:GIT_CONFIG_NOSYSTEM`，
+   或者用 `git -c user.name=... -c user.email=...` 显式给身份。
+3. **要彻底解决**，得让 DSH 的 shell 工具支持 per-call env，插件不再改 `process.env`；那是宿主侧的改动，不在本仓库范围。
+
+`[fork]` 同轮还做了 GitHub 可选：没填仓库时不再卡在 `setupPending`（细节见 `docs/06-test-baseline.md` 的
+"本轮：GitHub 变成可选"）。

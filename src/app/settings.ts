@@ -10,7 +10,7 @@ import type { SourceRegistry } from '../sources/registry.ts'
 import { resolveRoleModel } from './role-models.ts'
 import { changedPaths, settingsNotice } from './notices.ts'
 import type { Sessions } from './sessions.ts'
-import { setupChanged, type Setup } from './setup.ts'
+import { setupChanged, setupRestart, type Setup } from './setup.ts'
 import type { Store } from './store.ts'
 import { KV } from '../kv.ts'
 
@@ -173,7 +173,7 @@ export class Settings {
       const delivery = await sessions.delivery(`settings:${block}`)
       return { saved: true, revision: store.blockRevision(block), policy_changed: false, restarting: false, context_delivery: delivery }
     }
-    const restarting = setupChanged(old, settings) || !this.host.setup.configured()
+    const restarting = setupRestart(old, settings) || !this.host.setup.configured()
     const before = policyVersion(old), after = policyVersion(settings)
     const scope = (version: SettingsValue) => ({
       scope: (input: { source: string; meta: Record<string, unknown> }) => this.host.sources.scope(input, version) })
@@ -221,6 +221,20 @@ export class Settings {
       const part = sources.policyPart(instance.id)
       return sync && part && sync.ready(part) ? [instance.id] : []
     })
+  }
+  /**
+   * Writes `part` as Source `id`'s Policy section when the Policy holds none for it, and leaves an existing section alone.
+   * A Source without an external roster records its senders this way once, so a Policy a person edited afterwards stays theirs.
+   * @throws SettingsConflict if the `'policy'` block changed while the section was being written.
+   */
+  async ensurePolicyPart(id: string, part: Record<string, unknown>): Promise<void> {
+    const { store, sources } = this.host
+    const policy = store.settings().policy
+    if (policy.sources[id]) return
+    const revision = store.blockRevision('policy')
+    const next = sources.validatePolicy({ [id]: { ...part, admission: {} } })[id]
+    if (revision !== store.blockRevision('policy')) throw new SettingsConflict('Policy changed while recording the Source.')
+    await this.save('policy', { ...policy, sources: { ...policy.sources, [id]: next } }, revision, 'sync')
   }
   /**
    * Synchronizes source `id`'s policy section from its external source of truth, saves it as a `'policy'` revision when

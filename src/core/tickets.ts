@@ -1,7 +1,7 @@
 /** Tickets: their lifecycle from an accept to their end, their Subscriptions and their Inputs. */
 import { key } from './ids.ts'
 import { UserError } from './errors.ts'
-import { latestAssignment, latestReport, liveTicket, readUntil, runningAssignment, settled, threadKey, waitsForPerson } from './model.ts'
+import { latestAssignment, latestReport, liveTicket, readUntil, runningAssignment, settled, threadKey, turnRuns, waitsForPerson } from './model.ts'
 import type { Assignment, ChannelRef, Evaluation, Follow, Mandate, PolicyEffect, ThreadRef, Ticket, TicketEndBy, TicketInput, TicketOutcome,
   Trigger, TriggerDisposition } from './model.ts'
 import type { AssessmentOutcome } from './ports.ts'
@@ -19,6 +19,8 @@ export const automatic = (input: TicketInput | undefined): boolean => input?.kin
 const readBefore = (input: Extract<TicketInput, { kind: 'trigger' }>, until: string): boolean => input.readAt === undefined
   ? (input.deliveredAt && input.deliveredAt > input.at ? input.deliveredAt : input.at) <= until : !!input.readAt && input.readAt < until
 const STATUS_REQUEST = 'Report the current ticket status with orchestrator_report. This is a status-only request: do not resume implementation or perform external actions.'
+// [fork] 接管在工单里留下的痕迹，作为一条 note Input 随人下一次发来的内容一起送达下一回合。
+const TAKEOVER = (at: string): string => `A person took over this ticket at ${at} and interrupted the turn this assignment was in. Its Session, its directory and its Inbox go on: wait for what reaches you next.`
 
 /**
  * Manages each ticket's lifecycle: creates the ticket for an accept decision with its Mandate, Subscriptions, and first
@@ -160,6 +162,27 @@ export class Tickets extends EnginePart {
   stop(ticketId: string, reason?: string): Ticket {
     this.end(ticketId, 'human', 'stopped', this.now(), reason)
     return this.require(ticketId)
+  }
+  // [fork] 人接管工单：只中断当前 assignment 的当前回合，不做 stop——派工、Session、执行目录、inbox 与工单本身继续。
+  /**
+   * Interrupt the turn a ticket's worker runs, for a person who takes the work over: the Assignment, its Session, its
+   * directory, its Inbox and the ticket go on, and the ticket keeps a note Input naming when the takeover happened, which
+   * goes out with what reaches the worker next.
+   * @returns the Assignment whose turn was interrupted.
+   * @throws UserError when the ticket is unknown, has ended, or runs no turn to interrupt.
+   */
+  interrupt(ticketId: string): Assignment {
+    const ticket = this.require(ticketId)
+    if (!liveTicket(ticket)) throw new UserError('ticketEnded')
+    const running = runningAssignment(ticket)
+    if (!running || !turnRuns(running)) throw new UserError('nothingToInterrupt')
+    const at = this.now()
+    // Recorded as an Input but not asked for now: the worker took over nothing, so it waits for the next thing a person sends.
+    const note: TicketInput = { id: key('input', ticketId, 'takeover', at), kind: 'note', text: TAKEOVER(at), at }
+    ticket.inputs.push(note); ticket.undelivered.push(note.id); ticket.updatedAt = at
+    this.repo.tickets.save(ticket)
+    this.options.executor.interrupt(ticket, running)
+    return running
   }
   /**
    * Ends the stalled assignment of a retryable open ticket (`failed`, `blocked`, or failed input delivery) and starts a new one.

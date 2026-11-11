@@ -24,6 +24,7 @@ function harness(policyOverrides: Partial<Policy> = {}, { emit, prepareTicket }:
   const delivered: [string, string][] = []
   const executor: Executor = {
     start: vi.fn((ticket, assignment) => { launches.push([ticket, assignment]) }), deliver: vi.fn(ticket => { deliveries.add(ticket.id) }), stop: vi.fn(),
+    interrupt: vi.fn(),
   }
   let version = 'v1', paused = false
   const policy: Policy = {
