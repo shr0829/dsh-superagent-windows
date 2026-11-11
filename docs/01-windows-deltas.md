@@ -16,6 +16,7 @@
 | 10 | node 22.19+、pnpm 11.7、dsh 0.2.1 | 桌面版 CLI 路径不同 | `scripts/build.ps1` + npm 全局 dsh |
 | 11 | `~/.dsh` 与 `DSH_HOME` | `%USERPROFILE%\.dsh` | 一律读环境变量 |
 | 12 | 停 → 备份库 → 升级 → 起 | 迁移后不可降级 | 同一顺序，命令换成脚本 |
+| 13 | DSH 默认 `completionDelivery: wakeup`，`maxConsecutiveWakes` 不设上限 | 没人盯着的机器上，后台任务结算会自己唤醒会话开新回合，每次都是一次整段上下文的请求 | `scripts/set-background-wake.ps1` 默认写 `quiet`（`install.ps1` 第 5 步调用）；机制与管不到的路径见 `docs/08-background-wake.md` |
 
 **为什么不在 Windows 上装一层 POSIX 兼容层。** Git Bash 有 `sh` 与 `bash`，但没有 `tmux`、没有 Python 的 `fcntl`，也不改变服务随注销停止的事实；MSYS2 能补 `tmux`，代价是引入第二套路径空间（`/c/...` 与 `C:\...`），`stateDir` 与 PATH 都要翻译；WSL 能完整复刻上游，代价是把 agent 的工作树放进另一个文件系统，`gh`、仓库凭据、编辑器集成全部要重新对齐。三条路都是在 Windows 上再建一个 Linux，而本仓库要的是让上游代码在原生 Windows 上跑、失败点少而明确。
 

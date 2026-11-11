@@ -170,19 +170,28 @@ if ($append.Count -gt 0) {
     }
 }
 
-# ---------------------------------------------------------------- 5. 账号包装器
+# ---------------------------------------------------------------- 5. 后台自跑
+Step 'background wake'
+# 一个后台任务结束时，dsh-tool-jobs 默认会唤醒空闲会话开一个新回合（completionDelivery: wakeup，
+# maxConsecutiveWakes 不配就没有上限），等于在没人说话的时候烧一次整段上下文。默认关掉。
+# 想开回来：scripts\set-background-wake.ps1 -Profile $Profile -State on -MaxWakes 3
+& (Join-Path $PSScriptRoot 'set-background-wake.ps1') -Profile $Profile -DshHome $dshHome -State off
+Assert-ExitCode 'set-background-wake.ps1'
+
+# ---------------------------------------------------------------- 6. 账号包装器
 if (-not $SkipCli) {
     Step 'agent CLI wrappers'
     & (Join-Path $PSScriptRoot 'new-agent-cli.ps1') -Profile $Profile -NoPathUpdate
     Assert-ExitCode 'new-agent-cli.ps1'
 }
 
-# ---------------------------------------------------------------- 6. 下一步
+# ---------------------------------------------------------------- 7. 下一步
 Step 'next'
 Write-Output "1) powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dsh-superagent.ps1 start -Profile $Profile -Url http://127.0.0.1:$Port"
 Write-Output "2) 打开 http://127.0.0.1:$Port ，在 Settings → Sources / Policy / Execution / Prompts 里填仓库与允许名单"
 Write-Output "3) powershell -NoProfile -ExecutionPolicy Bypass -File scripts\register-task.ps1 -Profile $Profile   # 登录自启 + 每小时巡检"
 Write-Output "4) powershell -NoProfile -ExecutionPolicy Bypass -File scripts\doctor.ps1 -Profile $Profile -Url http://127.0.0.1:$Port"
+Write-Output "5) 后台自跑已关；要让后台任务跑完自己接着干：powershell -File scripts\set-background-wake.ps1 -Profile $Profile -State on -MaxWakes 3（见 docs\08-background-wake.md）"
 Write-Output ''
 Write-Output "stateDir: $StateDir"
 Write-Output "bundle:   $Bundle"

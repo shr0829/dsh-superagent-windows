@@ -107,6 +107,30 @@ dsh plugin --profile superagent add "link:C:\path\to\dsh-superagent-windows"
 
 `install.ps1` 会替你做这一步：先备份 patch，再追加缺的块（已存在 `id: webserver` 就只补 `port`/`host`）。
 
+### 4.1 后台自跑（默认关）
+
+`dsh-tool-jobs` 在一个后台任务结算时，若属主空闲就用 `owner.followup(...)` 唤醒它——那等于在你没敲字的时候开一个新回合，而 `maxConsecutiveWakes` 不配就没有上限。机制、实测代价和管不到的路径都在 `docs/08-background-wake.md`；这里只记结论：**默认关**。
+
+`install.ps1` 第 5 步调 `scripts\set-background-wake.ps1 -State off`，往同一个 `cordis.patch.yml` 写：
+
+```yaml
+- id: tool-jobs
+  config:
+    completionDelivery: quiet
+    maxConsecutiveWakes: 1
+    waitTimeoutMs: 30000
+    maxWaitTimeoutMs: 600000
+```
+
+```powershell
+# 想让后台任务跑完自己接着干
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\set-background-wake.ps1 -Profile superagent -State on -MaxWakes 3
+# 看当前值
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\set-background-wake.ps1 -Profile superagent
+```
+
+两条要注意：Cordis 的 patch 对 `config` 是整块替换而不是深合并，所以四个字段要写全（脚本会把现有等待参数抄进去）；改完要重启才生效。这条 override 只命中默认会话，worker / router 两个预设的 `tool-jobs` 不受影响（原因见 `docs/08-background-wake.md` 第 5 节）。
+
 ## 5. agent 的凭据
 
 agent 要有**自己的** GitHub 身份，否则它开的 PR、留的评论都会挂在你名下，后面出问题分不清是谁做的。
