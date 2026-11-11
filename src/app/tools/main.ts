@@ -183,6 +183,28 @@ export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
       schema: z.object({ query: z.string().min(1).max(200), limit: z.number().int().min(1).max(50).default(10) }).strict(),
       execute: async ({ query, limit }) => ({ query, memories: host.memory.search(query, limit).map(memoryCard) }),
     }),
+    tool({
+      name: 'orchestrator_memory_merge',
+      description: 'Replace memories that say the same thing with one: bodies join under their titles, tags and next hops unite, the originals are deleted from both stores, and their ids stay in supersedes. Read the cards first; not reversible.',
+      schema: z.object({
+        ids: z.array(z.string().min(1).max(40)).min(2).max(20),
+        title: z.string().min(1).max(200).optional().describe('Defaults to the joined titles.'),
+        text: z.string().min(1).max(20_000).optional().describe('Defaults to the joined bodies.'),
+        kind: z.enum(MEMORY_KINDS).optional(),
+        tags: z.array(z.string().max(40)).max(20).optional().describe('Defaults to the union.'),
+        next: z.array(z.string().regex(MEMORY_REF)).max(50).optional().describe('Defaults to the union, minus the merged ids.'),
+      }).strict(),
+      execute: async ({ ids, ...draft }) => {
+        const { record, backends, removed } = host.memory.merge(ids, draft)
+        return { ...memoryCard(record), supersedes: record.supersedes, removed, backends }
+      },
+    }),
+    tool({
+      name: 'orchestrator_memory_forget',
+      description: 'Delete one memory from the database and the Markdown copy. Merge instead when two memories still carry part of the answer.',
+      schema: z.object({ id: z.string().min(1).max(40) }).strict(),
+      execute: async ({ id }) => host.memory.remove(id),
+    }),
     routeTool(host),
     tool({
       name: 'orchestrator_ticket_retry',

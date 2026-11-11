@@ -76,6 +76,7 @@ interface MemoryRecord {
   source?: string
   thread?: string
   ticketId?: string
+  supersedes?: string[] // 这条记忆由哪些旧记忆合并而来
 }
 ```
 
@@ -103,8 +104,9 @@ id 的哈希是 FNV-1a（`src/memory/model.ts:44`），默认种子是"时间 + 
 ```
 
 - `rel` 由 `memoryRelation` 给：指向另一条记忆是 `continues`，指向工作对象就用它的前缀（`ticket`、`thread`、
-  `decision`、`trigger`）。卡片上因此不需要再排一遍路径。
-- `links` 不是把 `next` 原样抄出来，而是逐条问"这个地址现在还读得到吗"（`src/app/resources.ts` 的
+  `decision`、`trigger`）。卡片上因此不需要再排一遍路径。`source` 单独加一跳：记忆指回产生它的 ticket 时
+  `rel` 就是 `source`，它不参与 `next` 的并集，也不占合并时的去重。
+- `links` 不是把 `next` 原样抄出来，而是逐条问"这个地址现在还读得到吗"（`src/app/views/memory.ts` 的
   `memoryTarget`）。记忆指向的 ticket 被清掉、thread 关掉，那一跳就不出现；指向一条不存在的记忆同理。
   模型因此不会拿到一条会 404 的链接。
 - 正文超过一页时 `next_offset` 给出下一页的 offset，和既有资源的 `textPage` 是同一个约定。
@@ -125,12 +127,52 @@ store，存进卡片会在对象消失后变成死链。两边合起来是一条
 | --- | --- |
 | `orchestrator_memory_save` | 写一条记忆；参数 `kind`、`title`、`text`、`tags`、`next`、`source`、`thread`、`ticketId`、`id`；返回卡片加 `backends`（这次落到哪几种形态） |
 | `orchestrator_memory_search` | 按词找记忆，`query` 里每个词都要命中（标题、正文、标签、thread、ticket），返回卡片列表，默认 10 条 |
+| `orchestrator_memory_merge` | 把 2–20 条记忆合成一条：正文按 `## 标题` 拼接，标签与 `next` 取并集，原条目删除，id 记进 `supersedes` |
+| `orchestrator_memory_forget` | 按 id 删除一条记忆，数据库与 Markdown 两份都删 |
 
 资源侧是 `memories`（倒序列表）与 `memory/<id>`（卡片 + 一跳 + 正文分页）。`orchestrator_read memories` 拿到的
 是列表页，`orchestrator_read memory/mem_…` 才是正文。提示词里加了一句说明，工具白名单与资源表由
-`tests/model-surface.spec.ts` 的预算守着（`BUDGET.orchestrator` 59_000 → 61_000）。
+`tests/model-surface.spec.ts` 的预算守着（`BUDGET.orchestrator` 61_000 → 63_000，实测 62_004）。
 
-## 五、边界
+## 五、遗忘与合并
+
+这两件事都不该由存储层自己决定，但也不该只剩"手工改文件"一条路。
+
+**遗忘**（`Memory.remove`，`src/memory/store.ts:78`）对每个还活着的后端各删一次，任何一个后端报错都吞掉——
+删不掉的原因会由下一次 `get` 暴露，而不是让整个调用失败。返回 `{ id, removed }`，`removed` 表示至少删掉了一份；
+再删同一条返回 `false`，所以这个动作是幂等的。删除之后，别的记忆里指向它的那一跳也就不再出现：`memoryLinks`
+本来就会问"目标还在不在"。
+
+**合并**（`Memory.merge`）解决的是另一种情况：两条记忆各自只对了一半，删掉任何一条都会丢信息。规则是确定的：
+
+- 至少两条、至多 20 条**存在**的记录；不足两条直接报 `Merging needs at least two existing memories`，不写半条。
+- 正文按 `at` 排序后拼成 `## <title>\n\n<text>`，中间空一行；`title` 默认是各标题用 ` / ` 连起来并截到 200 字符，
+  `kind`、`text`、`title` 都可以由调用方覆盖。
+- `tags` 取并集；`next` 取并集后**减去指向被合并条目的那些**——否则新记忆会指回已经删掉的自己。
+- `source`、`thread`、`ticketId` 取最早那条的，`supersedes` 记下被合并的 id。`supersedes` 只做记录：
+  召回时不展开，面板上单独列出，方便事后追问"这条是从哪几条合出来的"。
+- 先写新记录，再逐条删旧的；中途失败时旧记录还在，最多多出一条合并结果，不会两样都没有。
+
+两个动作都不自动发生：没有定时去重、没有按相似度触发、没有"摘要压缩"。什么时候该合并由一个看着上下文的
+调用方决定——现在是模型，面板上则是由人勾选。
+
+## 六、面板记忆页
+
+`memory` 是面板的一个一级页（`src/client/memory.tsx`），列表与详情分别对应 `GET memories` 与 `GET memories/:id`：
+
+- 列表按 `at` 倒序，每行一个复选框、一个标题按钮（进详情）、kind 标签、时间、字符数与标签；搜索框写入 `q`，
+  沿用 `search` 的与语义，命中为 0 时给"没有匹配"而不是空列表。
+- 详情是卡片加正文，正文走 `MarkdownLite`；下面一节列 `links`，每条按 `rel` 给一个按钮，跳到记忆、ticket、thread、
+  decision 或 trigger；`supersedes` 单独列出，只显示 id。删除走 `ConfirmButton`，成功后回列表并提示。
+- 勾选两条以上时工具栏出现"合并所选"，弹窗里说明规则（正文怎么拼、原条目会删），确认后调
+  `POST memories/merge`；成功后刷新列表并提示合并了几条。
+
+HTTP 侧四个端点：`GET memories`（`q`、`offset`、`limit`）、`GET memories/:id`、`POST memories/merge`、
+`POST memories/:id/forget`。请求类型写在 `src/app/api.ts`，视图逻辑在 `src/app/views/memory.ts`，
+和 `memory/<id>` 资源共用同一套 `links` 解析——面板与模型看到的是同一条链，不是两套投影。
+
+
+## 七、边界
 
 - **没有向量检索，也没有全文索引。** `search` 是对全部记录做词包含判断（`src/memory/store.ts:69`），命中即返回，
   不排序、不算相关度。记忆量到几千条时这是几十毫秒的线性扫；到几万条才需要索引层，那时再谈 FTS5 或向量。
@@ -138,15 +180,15 @@ store，存进卡片会在对象消失后变成死链。两边合起来是一条
   这是文章 3.3 的刻意选择，不是实现偷懒。
 - **ticket 详情仍然没有 links。** 页面预算 3000 字节（`tests/tools.spec.ts`）卡着，加了就红。记忆的入口因此是
   `memories`、`memory/<id>` 和搜索，不是从 ticket 卡片直接跳。
-- **没有遗忘/合并工具。** `Memory.remove` 在存储层存在，但没有暴露成工具或资源操作；去重、过期、摘要压缩都还没做。
-- **面板没有记忆页。** 本轮只做工具与资源；`memory.status()` 已经能报"数据库在不在、兜底原因是什么"，
-  接到设置页或健康页是下一步。
+- **合并与遗忘不自动发生。** 没有定时去重、相似度触发或摘要压缩；什么时候合并由模型或面板上的人决定。
+- **`supersedes` 只是记录。** 召回不沿它展开，面板只列 id；想知道合并前的原文，只能去 Markdown 目录翻
+  （原条目已经被删掉，所以真要保留就该先复制一份）。
 - **手工改 Markdown 立刻可读，但数据库副本优先。** `MarkdownMemory.get/list` 每次调用都读目录，不需要重启；但如果同一个 id
-  在数据库里也有，合并时数据库那份赢（第六节验证第 4 条），所以要改一条已经在库里的记忆，改库或先删掉库里的那条。
+  在数据库里也有，合并时数据库那份赢（第八节验证第 4 条），所以要改一条已经在库里的记忆，改库或先删掉库里的那条。
 
-## 六、验证
+## 八、验证
 
-`tests/memory.spec.ts` 八条：
+`tests/memory.spec.ts` 十条：
 
 1. Markdown 往返：含中文、引号、代码块正文原样读回。
 2. 一次 `save` 同时落数据库与 Markdown，两边都能 `get`/`all`。
@@ -159,6 +201,10 @@ store，存进卡片会在对象消失后变成死链。两边合起来是一条
    带斜杠的不行。
 7. 正文分页：列表卡片只有 `chars`，`memory/<id>` 按 `limit` 分页，`next_offset` 与 `total_chars` 可拼回原文。
 8. 搜索：标题、正文、标签、thread 四个位置各自能命中，多词是与关系。
+9. 遗忘：两份都删，文件消失，指向它的一跳消失，第二次删除返回 `false`。
+10. 合并：`supersedes`、拼接后的正文、标题与标签并集、`next` 去掉已合并 id、原条目消失、单条合并报错。
 
-`docs/upstream/007-architecture.md` 的模块表与测试表同步登记了 `src/memory/*` 与 `tests/memory.spec.ts`；
+`tests/panel-memory.spec.tsx` 两条：列表→详情→一跳→遗忘；按词过滤→勾选→确认→合并请求与列表结果。
+`docs/upstream/007-architecture.md` 的模块表与测试表同步登记了 `src/memory/*`、`src/app/views/memory.ts`、
+`src/client/memory.tsx`、`tests/memory.spec.ts` 与 `tests/panel-memory.spec.tsx`；
 `node_modules\.bin\tsc.CMD --noEmit` 与 `node_modules\.bin\vitest.CMD run` 全绿。

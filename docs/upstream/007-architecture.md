@@ -350,6 +350,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/app/tools/executor.ts` | An Executor Session's tools |
 | `src/app/http.ts` | The `/orchestrator/api` routes: the same-origin check, request limits and one status per kind of failure |
 | `src/app/api.ts` | `Api`, every route with its parameters, query, body and response, and the filters of the lists; it imports only types, so the panel bundles it |
+| `src/app/views/memory.ts` | Durable memory's views: the card list with its search, one memory with its text and its hops, and the target check that drops a hop whose object is gone |
 | `src/app/views/text.ts` | The two forms of a view's text: `preview`, plain text on one line, and `markdown` without HTML; `plain` and `readable` |
 | `src/app/views/records.ts` | The rows the views share: Triggers, Tickets, Threads, Decisions and Channel links, and `ownersOf`, the owners of follow-ups as one request reads them |
 | `src/app/views/tickets.ts` | The Ticket lists by stage, a Ticket's page, the Mandate basis facts and the Executor's load |
@@ -389,6 +390,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/client/overview.tsx` | The overview |
 | `src/client/source.tsx`, `trigger.tsx`, `eval.tsx`, `execution.tsx` | One file per stage: its status, and its settings where it has some |
 | `src/client/thread.tsx`, `ticket.tsx` | The record pages: a Thread with its timeline, and a Ticket with its authorization, Inputs and Assignments |
+| `src/client/memory.tsx` | The durable memory tab: the list with its search and its merge selection, and one memory with its body, its hops, the memories it superseded, and forget |
 | `src/client/settings.tsx` | The Settings tab: the group navigation and the group on screen |
 | `src/client/settings-kit.tsx` | The building blocks of settings blocks: the settings the stage groups share, `useBlockDraft`, the fields, among them a Source kind's, and the history of saves |
 | `src/client/prompts.tsx` | The Prompts settings: the page owns the view it read and its editor the draft, and the Edit, Full prompt and History tabs render from them; a built-in part's editor shows a changed default and keeps or drops the override |
@@ -414,7 +416,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/stage.spec.ts` | The Ticket stages, row by row |
 | `tests/router-batch.spec.ts` | Router batching: the Thread as the batch boundary, the Triggers one Eval merges, the queue of a Thread whose Eval runs, and the sibling batch its worker reads |
 | `tests/recall.spec.ts` | The links a read returns: every link of a Trigger, Thread and Decision is readable by the same router, the closed chain Trigger → Thread → Ticket → Trigger, and the links a role may not follow |
-| `tests/memory.spec.ts` | Durable memory in both forms: the Markdown round trip, every save in the database and the Markdown copy, the Markdown-only fallback when the database cannot open, the merge order, the chain a card inlines with a gone hop dropped, and search by words |
+| `tests/memory.spec.ts` | Durable memory in both forms: the Markdown round trip, every save in the database and the Markdown copy, the Markdown-only fallback when the database cannot open, the merge order, the chain a card inlines with a gone hop dropped, search by words, forget in both forms, and merge keeping `supersedes` while the originals go |
 | `tests/takeover.spec.ts` | A person taking a ticket's turn over: the turn is interrupted with the inbox kept, the assignment, the ticket and its directory go on, the takeover is a note on the ticket, and a ticket that runs no turn is refused |
 | `tests/chat.spec.ts` | The chat channel: a person's message and not a relay, a subagent's prompt or the orchestrator's own turn; one Thread per Session; the answer injected back into it; the operator listed once in the Policy; a closed Session reported as gone |
 | `tests/chat-only.spec.ts` | A deployment with no GitHub repository or account: the `gh` shim that says so, worker git without a credential helper, blocked commands without an account to offer, and git verification that still refuses a leftover helper |
@@ -452,7 +454,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/deployment.spec.ts`, `tests/environment.spec.ts`, `tests/index.spec.ts` | The plugin configuration and setup, the agent's process environment, the plugin entry |
 | `tests/service-script.spec.ts` | `scripts/dsh-superagent` against fake `ps`, `tmux` and `dsh` |
 | `tests/client.spec.tsx`, `tests/navigation.spec.ts`, `tests/controls.spec.tsx` | The client plugin's registration and polling, Session navigation and route memory, the local controls, and the panel's imports, which have no cycle |
-| `tests/panel-overview.spec.tsx`, `panel-source.spec.tsx`, `panel-trigger.spec.tsx`, `panel-eval.spec.tsx`, `panel-execution.spec.tsx` | Each page of the panel, against a fake management API answered by route |
+| `tests/panel-overview.spec.tsx`, `panel-source.spec.tsx`, `panel-trigger.spec.tsx`, `panel-eval.spec.tsx`, `panel-execution.spec.tsx`, `panel-memory.spec.tsx` | Each page of the panel, against a fake management API answered by route |
 | `tests/panel-settings.spec.tsx`, `panel-prompts.spec.tsx`, `panel-deployment.spec.tsx`, `panel-panel.spec.tsx` | The settings groups, drafts and history, the prompts, the Deployment page, and the panel's search, glossary and route memory |
 | `tests/draft.spec.ts`, `tests/prompt-config.spec.ts`, `tests/markdown.spec.ts`, `tests/marks.spec.ts` | Draft states, merges and the save bar's line; the prompt configuration by section and the line diff; the Markdown subset and its links; the mark of every state the views classify |
 | `tests/locales.spec.ts`, `tests/styles.spec.ts` | The copy in both languages, the stylesheet |

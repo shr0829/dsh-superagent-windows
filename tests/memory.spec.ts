@@ -141,3 +141,41 @@ it('searches title, body, tags, thread and ticket by words, newest first', () =>
   expect(memory.search('PowerShell 5.1').map(record => record.id)).toEqual(['mem_00000008'])
   memory.close()
 })
+
+it('forgets an entry in both forms, so neither the database nor the Markdown copy brings it back', async () => {
+  const directory = state()
+  const memory = openMemory(directory)
+  memory.save(memoryRecord({ title: 'Wrong turn', text: 'This one should go.' }, '2026-09-09T00:00:00.000Z', 'mem_00000020'))
+  memory.save(memoryRecord({ title: 'Kept', text: 'Still here.', next: ['memory/mem_00000020'] },
+    '2026-09-09T00:00:01.000Z', 'mem_00000021'))
+  expect(memory.remove('mem_00000020')).toEqual({ id: 'mem_00000020', removed: true })
+  expect(memory.get('mem_00000020')).toBeUndefined()
+  expect(readdirSync(join(directory, 'memory'))).toEqual(['mem_00000021.md'])
+  expect(new MarkdownMemory(join(directory, 'memory')).get('mem_00000020')).toBeUndefined()
+  // A hop that named the forgotten entry stops resolving instead of handing the reader a dead read path.
+  const host = hostOf(memory)
+  expect(hop(await readResource(host, 'memory/mem_00000021', 0, undefined), 'continues')).toBeUndefined()
+  expect(memory.remove('mem_00000020').removed).toBe(false)
+  memory.close()
+})
+
+it('merges several memories into one, recording what it superseded and deleting the originals', () => {
+  const memory = openMemory(state())
+  memory.save(memoryRecord({ title: 'First', text: 'One.', tags: ['a'], next: ['memory/mem_00000031', 'ticket/ticket-1'] },
+    '2026-09-09T00:00:00.000Z', 'mem_00000030'))
+  memory.save(memoryRecord({ title: 'Second', text: 'Two.', tags: ['b'], next: ['memory/mem_00000030'] },
+    '2026-09-09T00:00:01.000Z', 'mem_00000031'))
+  const { record, removed, backends } = memory.merge(['mem_00000030', 'mem_00000031'])
+  expect(backends).toEqual(['database', 'markdown'])
+  expect(removed.sort()).toEqual(['mem_00000030', 'mem_00000031'])
+  expect(record.supersedes).toEqual(['mem_00000030', 'mem_00000031'])
+  expect(record.text).toBe('## First\n\nOne.\n\n## Second\n\nTwo.')
+  expect(record.title).toBe('First / Second')
+  expect([...record.tags].sort()).toEqual(['a', 'b'])
+  // Hops to the merged entries are gone; hops to other objects survive the merge.
+  expect(record.next).toEqual(['ticket/ticket-1'])
+  expect(memory.get('mem_00000030')).toBeUndefined()
+  expect(memory.all().map(item => item.id)).toEqual([record.id])
+  expect(() => memory.merge(['mem_00000030'])).toThrow('at least two')
+  memory.close()
+})

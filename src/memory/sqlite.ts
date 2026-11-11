@@ -44,5 +44,9 @@ export class SqliteMemory implements MemoryStore {
       .map(row => JSON.parse(String(row.value)) as MemoryRecord)
   }
 
+  remove(id: string): boolean {
+    return Number(this.db.prepare('DELETE FROM memory WHERE id=?').run(id).changes) > 0
+  }
+
   close(): void { this.db.close() }
 }

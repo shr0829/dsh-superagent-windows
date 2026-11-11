@@ -291,12 +291,22 @@ DSH 的 `SessionCreateRequest` 里 `workspaceId` 与 `cwd` 是两个可选字段
 - **id 与地址。** `mem_` + FNV-1a 八位十六进制 + 两位种子里程；`next` 只接受 `memory/`、`ticket/`、
   `thread/`、`decision/`、`trigger/` 五种前缀，存不进别的地址。`thread/` 与 `trigger/` 的键由 Source 定义，
   允许冒号（`thread/feishu:oc_team:om_1`），不允许斜杠。
-- **模型面。** `orchestrator_memory_save`、`orchestrator_memory_search`；资源 `memories`、`memory/<id>`。
-  `tests/model-surface.spec.ts` 的 `BUDGET.orchestrator` 从 59_000 提到 61_000（实测 60_465）。
+- **模型面。** `orchestrator_memory_save`、`orchestrator_memory_search`、`orchestrator_memory_merge`、
+  `orchestrator_memory_forget`；资源 `memories`、`memory/<id>`。`tests/model-surface.spec.ts` 的
+  `BUDGET.orchestrator` 从 61_000 提到 63_000（实测 62_004）。
+- **遗忘与合并。** `remove` 对每个后端各删一次、吞掉单个后端的错误，返回 `{id, removed}`，再删返回 `false`。
+  `merge` 要求至少两条存在的记录；正文按 `## 标题` 拼接，标签与 `next` 取并集并减去被合并的 id，
+  `supersedes` 记下来源，先写新记录再删旧记录。两者都不自动发生。
+- **面板与 HTTP。** `memory` 一级页（列表、搜索、详情、一跳、合并、遗忘）对应 `GET memories`、
+  `GET memories/:id`、`POST memories/merge`、`POST memories/:id/forget`；面板与 `memory/<id>` 共用
+  `src/app/views/memory.ts` 的链接解析。
 
-测试：`tests/memory.spec.ts` 8 条（Markdown 往返、双写、数据库缺失兜底、合并顺序、链式召回含死跳丢弃与分页、
-带冒号的 thread 键与 `source` 回跳、正文分页、四位置词搜索）。`docs/upstream/007-architecture.md` 的模块表与
-测试表同步登记。
+测试：`tests/memory.spec.ts` 10 条（Markdown 往返、双写、数据库缺失兜底、合并顺序、链式召回含死跳丢弃与分页、
+带冒号的 thread 键与 `source` 回跳、正文分页、四位置词搜索、两份都删的遗忘、合并的 `supersedes` 与正文拼接），
+加 `tests/panel-memory.spec.tsx` 2 条（列表→详情→一跳→遗忘；按词过滤→勾选→确认→合并）。`docs/upstream/007-architecture.md`
+的模块表与测试表同步登记。
 
 全量：`node_modules\.bin\tsc.CMD --noEmit` exit 0；`node_modules\.bin\vitest.CMD run` →
-Test Files 65 passed | 1 skipped (66)，Tests **1221 passed | 21 skipped (1242)**，0 failed，17.94s。
+Test Files 66 passed | 1 skipped (67)，Tests **1225 passed | 21 skipped (1246)**，0 failed，17.31s。
+面板从 6 个一级 tab 变成 7 个（`memory` 插在 `execution` 与 `settings` 之间），`tests/panel-overview.spec.tsx`
+与 `tests/panel-panel.spec.tsx` 的 tab 断言同步改了。

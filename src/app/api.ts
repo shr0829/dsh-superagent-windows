@@ -7,6 +7,7 @@ import type { OverviewView } from './views/overview.ts'
 import type { SettingsView } from './views/settings.ts'
 import type { SourceStatusView } from './views/sources.ts'
 import type { DecisionListView, SearchView, ThreadDetailView, ThreadListView } from './views/threads.ts'
+import type { MemoryDetailView, MemoryListView, MemoryMergeRequest } from './views/memory.ts'
 import type { TicketListView } from './views/tickets.ts'
 
 export const TICKET_FILTERS = ['open', 'person', 'working', 'idle', 'ended'] as const
@@ -30,6 +31,10 @@ export interface Api {
   'POST triggers/:id/requeue': { response: { queued: boolean } }
   'GET decisions': { query?: Paged & { kind?: string; window?: '24h' }; response: DecisionListView }
   'POST decisions/:id/dismiss': { response: { dismissed: true } }
+  'GET memories': { query?: Paged & { q?: string }; response: MemoryListView }
+  'GET memories/:id': { response: MemoryDetailView }
+  'POST memories/merge': { body: MemoryMergeRequest; response: MemoryDetailView & { removed: string[]; backends: ('database' | 'markdown')[] } }
+  'POST memories/:id/forget': { response: { id: string; removed: boolean } }
   'GET tickets': { query?: Paged & { state?: TicketFilter }; response: TicketListView }
   'GET tickets/:id': { response: TicketPageView }
   'POST tickets/:id/retry': { response: { retried: true } }
