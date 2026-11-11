@@ -19,7 +19,7 @@
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\doctor.ps1
 ```
 
-`doctor.ps1` 是只读的，14 项检查按 PASS/WARN/FAIL 打表。安装前正常的 FAIL 只有两三条：
+`doctor.ps1` 是只读的，15 项检查按 PASS/WARN/FAIL 打表。安装前正常的 FAIL 只有两三条：
 `profile 'superagent'` 不存在、`profile cordis.patch.yml` 不存在。其余 FAIL 必须先解决，
 安装脚本不会替你猜。
 

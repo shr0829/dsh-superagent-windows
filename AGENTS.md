@@ -26,13 +26,17 @@
    包装器存在的意义就是让凭据留在自己的配置目录里。
 6. **只监听 `127.0.0.1`。** 面板与 Management API 都绑定回环；不要为了"方便访问"改成 `0.0.0.0`——
    上游的 Host 校验和 `x-orchestrator-request` 头是唯一的防线。
+7. **只收 Super-Agent 的 Windows 部署内容。** 操作者本机的凭据与工具配置（谁的 `gh` 登录、
+   `hosts.yml` 长什么样、哪个目录在 PATH 上、某台机器上面板为什么不刷新）不进这个仓库。
+   本机排障写在本机笔记里；仓库里只留"任何一台 Windows 机器照做都能复现"的东西。判断方法：
+   把这一行拿到一台干净机器上照抄，还能成立就收，否则说明它是本机现状的描述。
 
 ## 改完必须做的验证
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\fix-encoding.ps1 -Check   # BOM + CRLF，只查不写
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\test-scripts.ps1   # BOM + 语法 + 点源引用
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\doctor.ps1          # 14 项环境体检
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\doctor.ps1          # 15 项环境体检
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dsh-superagent.ps1 status
 ```
 
