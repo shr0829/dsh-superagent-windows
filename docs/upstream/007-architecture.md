@@ -313,6 +313,11 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/core/ids.ts` | `key`: ids derived from their inputs, equal for equal inputs |
 | `src/core/memory.ts` | `MemoryRepositories`: the Store's repositories in memory, in the Store's order and with its nested rollback, for domain tests |
 | `src/core/index.ts` | The core's exports |
+| `src/memory/model.ts` | Durable memory's record: `MemoryRecord`, `MEMORY_KINDS`, the `memory_<hash>` id, `memoryResource` and the `MEMORY_REF` form of a next hop |
+| `src/memory/store.ts` | `Memory`, the facade over both forms: a save lands in every open store, a read merges by id with the database winning, and `search` matches words rather than ranking them |
+| `src/memory/sqlite.ts` | `SqliteMemory`: the `memory` table in its own database file beside the orchestrator database, so the memory subsystem can fail open |
+| `src/memory/markdown.ts` | `MarkdownMemory`: one `<id>.md` per memory with JSON front matter, written by temporary file and rename; `renderMemory` and `parseMemory` |
+| `src/memory/index.ts` | `openMemory`: the database with the Markdown copy when it opens, the Markdown directory alone when it does not |
 | `src/app/runtime.ts` | The Runtime, the composition root, with its start and stop |
 | `src/app/setup.ts` | Setup, and `setupChanged`, whether a save changes a field setup reads |
 | `src/app/passes.ts` | Passes, the pass scheduler |
@@ -409,6 +414,7 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/stage.spec.ts` | The Ticket stages, row by row |
 | `tests/router-batch.spec.ts` | Router batching: the Thread as the batch boundary, the Triggers one Eval merges, the queue of a Thread whose Eval runs, and the sibling batch its worker reads |
 | `tests/recall.spec.ts` | The links a read returns: every link of a Trigger, Thread and Decision is readable by the same router, the closed chain Trigger → Thread → Ticket → Trigger, and the links a role may not follow |
+| `tests/memory.spec.ts` | Durable memory in both forms: the Markdown round trip, every save in the database and the Markdown copy, the Markdown-only fallback when the database cannot open, the merge order, the chain a card inlines with a gone hop dropped, and search by words |
 | `tests/takeover.spec.ts` | A person taking a ticket's turn over: the turn is interrupted with the inbox kept, the assignment, the ticket and its directory go on, the takeover is a note on the ticket, and a ticket that runs no turn is refused |
 | `tests/chat.spec.ts` | The chat channel: a person's message and not a relay, a subagent's prompt or the orchestrator's own turn; one Thread per Session; the answer injected back into it; the operator listed once in the Policy; a closed Session reported as gone |
 | `tests/chat-only.spec.ts` | A deployment with no GitHub repository or account: the `gh` shim that says so, worker git without a credential helper, blocked commands without an account to offer, and git verification that still refuses a leftover helper |

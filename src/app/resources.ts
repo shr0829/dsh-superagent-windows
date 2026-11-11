@@ -6,9 +6,10 @@ import { readGithub } from '../sources/github-read.ts'
 import { feishuReferences, feishuRead } from '../sources/feishu-read.ts'
 import { feishuRef } from '../sources/feishu.ts'
 import { feishuTriggerId } from '../sources/feishu-trigger.ts'
-import { ASSIGNMENTS, INPUTS, assignmentLine, decisionCard, decisionDetails, inputLine, newestPage, preview, textPage, threadCard, ticketCard,
-  ticketDetails, triggerCard, type TicketThread } from './cards.ts'
+import { ASSIGNMENTS, INPUTS, assignmentLine, decisionCard, decisionDetails, inputLine, memoryCard, newestPage, preview, textPage, threadCard,
+  ticketCard, ticketDetails, triggerCard, type TicketThread } from './cards.ts'
 import { linksOf } from './recall.ts'
+import { memoryRelation, type Memory } from '../memory/index.ts'
 import { threadTitle } from './views/records.ts'
 import { transcriptEntry } from './context.ts'
 import { builtInParts, defaultPrompts } from './prompts.ts'
@@ -29,6 +30,9 @@ export const RESOURCES: readonly { name: string; holds: string; executor?: true 
   { name: 'thread/<key>', holds: 'one thread: its label and link, its tickets and latest decisions, its triggers newest first, '
     + 'and the links to those tickets and decisions', executor: true },
   { name: 'decisions', holds: 'decisions, newest first' },
+  { name: 'memories', holds: 'durable memories, newest first, each with the summary it inlines and the read path of its whole entry' },
+  { name: 'memory/<id>', holds: 'one memory: its summary, tags and source, the links to the memories and work objects it leads to, ' +
+    'and its full body' },
   { name: 'decision/<id>', holds: 'one decision with its audit, and the links to its thread, ticket and triggers' },
   { name: 'ticket/<id>', holds: 'a ticket\'s card, the trigger, decision and threads it is tied to, its latest assignments with the start of each '
     + 'report, and its inputs, newest first', executor: true },
@@ -64,6 +68,8 @@ export interface ResourceHost {
   readonly prompts: Pick<Prompts, 'current' | 'version' | 'history' | 'skills' | 'defaultChanged'>
   readonly commands: Commands
   readonly masterId: string
+  /** Durable chain memory; the main Session reads and writes it, worker Sessions cannot reach it. */
+  readonly memory: Memory
   readonly context: Context
   promptVersion(sessionId: string): PromptVersion
   /** Whether a Session may read `revision` (the revision it currently runs under or any revision it ran under previously). */
@@ -116,6 +122,14 @@ const triggerLine = (trigger: Trigger) => ({ trigger_id: trigger.id, actor: trig
 async function transcript(host: ResourceHost, ticketId: string) {
   return (await host.context.sessionController.inspect(workerSessionId(ticketId) as SessionId)).events
 }
+/** A memory's next hop, kept only while its target still exists, so recall never links to an entry that has gone. */
+function memoryTarget(host: ResourceHost, ref: string): string | undefined {
+  const [kind, ...rest] = ref.split('/'), id = rest.join('/')
+  const found = kind === 'memory' ? host.memory.get(id) : kind === 'thread' ? host.store.threads.get(id)
+    : kind === 'ticket' ? host.store.tickets.get(id) : kind === 'decision' ? host.store.decisions.get(id)
+      : kind === 'trigger' ? host.store.triggers.get(id) : undefined
+  return found && ref
+}
 
 const ROUTES: readonly Route[] = [
   ['tickets', read => {
@@ -156,6 +170,20 @@ const ROUTES: readonly Route[] = [
     return { ...card, ...links, tickets, decisions, ...page }
   }],
   ['decisions', read => list(read, (offset, count) => main(read).store.read.recentDecisions(offset, count).map(decisionCard))],
+  ['memories', read => list(read, (offset, count) => main(read).memory.list(offset, count).map(memoryCard))],
+  ['memory/', read => {
+    const host = main(read), record = host.memory.get(read.rest)
+    if (!record) throw new Error('Unknown memory')
+    // This resource is the card's own read path, so the card drops it and keeps only the chain's next hops. The edition
+    // the entry came from is a hop too: a reader walks back to the ticket that raised it as easily as forward to what it
+    // continues, and either is dropped once its target is gone.
+    const { read: _read, ...card } = memoryCard(record)
+    const hops: (readonly [string, string | undefined])[] = [
+      ['source', record.source ? memoryTarget(host, record.source) : undefined],
+      ...record.next.map(ref => [memoryRelation(ref), memoryTarget(host, ref)] as const),
+    ]
+    return { ...card, ...linksOf(hops), ...text(read, record.text) }
+  }],
   ['decision/', read => {
     const decision = main(read).store.decisions.get(read.rest)
     if (!decision) throw new Error('Unknown decision')

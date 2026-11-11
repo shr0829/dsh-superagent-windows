@@ -6,7 +6,8 @@ import { UserError, followupOwners, key, reasonText, type Decision, type Decisio
   from '../../core/index.ts'
 import { IM_WORDS, NOTE_WORDS, wordCount } from '../../infra/text.ts'
 import { AssessmentSchema, EvalReadSchema, WorktreeNameSchema, type MasterAssessor } from '../assessment.ts'
-import { ticketCard } from '../cards.ts'
+import { ticketCard, memoryCard } from '../cards.ts'
+import { MEMORY_KINDS, MEMORY_REF, memoryRecord, type Memory } from '../../memory/index.ts'
 import { PromptConfigSchema, savePrompts, type Prompts } from '../prompts.ts'
 import { readResource, type MainResourceHost, type ResourceHost } from '../resources.ts'
 import type { Sessions } from '../sessions.ts'
@@ -26,6 +27,8 @@ export interface MainToolsHost {
   readonly settings: Pick<Settings, 'view' | 'block' | 'save' | 'pause' | 'sync'>
   readonly assessor: Pick<MasterAssessor, 'context' | 'read' | 'decide'>
   readonly resources: ResourceHost
+  /** Durable chain memory, written here and recalled through `orchestrator_read memory/<id>`. */
+  readonly memory: Memory
   /** Schedules a pass to carry out work queued by an Engine command (such as an Eval or ticket resume). */
   requestPass(): void
   sendReplies(): Promise<void>
@@ -157,6 +160,29 @@ export function mainTools(host: MainToolsHost, agent: Agent): Tool[] {
   return [
     readTool('Read one page of a resource the resource parameter lists, such as the ticket list or a ticket. Follow next_offset, and next_resource where a page names one. A projection also lists links, the resources of the objects it stands for: expand along the link whose target the answer needs, one hop at a time, rather than reading a whole subtree.',
       false, (resource, offset, limit, signal) => readResource(resources, resource, offset, limit, undefined, signal)),
+    tool({
+      name: 'orchestrator_memory_save',
+      description: 'Record one durable memory — a fact, a standing preference, a decision or a lesson — that must survive compaction. Title is inlined by recall; text stays behind memory/<id>; next are the chain\'s hops.',
+      schema: z.object({
+        kind: z.enum(MEMORY_KINDS),
+        title: z.string().min(1).max(200).describe('Self-contained one line.'),
+        text: z.string().min(1).max(20_000).describe('Markdown body, read only through memory/<id>.'),
+        tags: z.array(z.string().max(40)).max(20).default([]),
+        next: z.array(z.string().regex(MEMORY_REF)).max(50).default([]).describe('memory/<id>, ticket/<id>, thread/<key>, decision/<id> or trigger/<id>'),
+        id: z.string().max(40).optional().describe('Revise that entry instead of adding another.'),
+      }).strict(),
+      execute: async args => {
+        const record = memoryRecord(args)
+        const saved = host.memory.save(record)
+        return { ...memoryCard(record), backends: saved.backends }
+      },
+    }),
+    tool({
+      name: 'orchestrator_memory_search',
+      description: 'Find durable memories by words in title, text, tags, thread or ticket, newest first. Each card inlines its next hops: read memory/<id> and follow its links instead of searching again.',
+      schema: z.object({ query: z.string().min(1).max(200), limit: z.number().int().min(1).max(50).default(10) }).strict(),
+      execute: async ({ query, limit }) => ({ query, memories: host.memory.search(query, limit).map(memoryCard) }),
+    }),
     routeTool(host),
     tool({
       name: 'orchestrator_ticket_retry',
