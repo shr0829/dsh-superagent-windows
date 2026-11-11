@@ -15,8 +15,8 @@
   "packageManager": "pnpm@11.7.0",
   "verifiedDsh": "0.2.1-rc.3",
   "notes": [
-    "锁定提交是 2026-10-31 上游的唯一提交（git log -1 --format=%H 得到），scripts/build.ps1 默认 checkout 这个 SHA。",
+    "锁定提交是 2026-10-31 上游的唯一提交（git log -1 --format=%H 得到）；源码已按这个 commit 收入仓库，本字段只作为对照基线与升级起点。",
     "verifiedDsh 是本仓库文档里用于安装验证的 dsh 版本；换版本时先确认仍在 engines.dsh 范围内，否则插件会被判为不兼容。",
-    "升级上游：改这里的 commit → 跑 scripts/build.ps1 → 重启服务，见 docs/03-operate.md 的升级段。"
+    "升级上游：改这里的 commit → scripts/sync-upstream.ps1 看差异 → 手动合并 → pnpm test → 重启服务，见 docs/02-install.md 的升级段。"
   ]
 }

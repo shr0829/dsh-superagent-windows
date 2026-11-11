@@ -32,29 +32,29 @@ npm install -g @deepseek-ai/dsh@0.2.1-rc.3
 版本钉在 `0.2.1-rc.3` 是因为上游文档就是这么写的；装 `0.2.2-rc.1` 也能跑（本机验证过 0.2.2-rc.1），
 但上游 peerDependencies 全部钉在 `0.2.1-alpha.2` 这一代，跨 minor 升级时留意日志里的兼容性提示。
 
-## 1. 构建上游
+## 1. 构建 bundle
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build.ps1
 ```
 
-`build.ps1` 只做四件事，全部围绕 `vendor\upstream.lock.json`：
+源码随仓库提供（`src/ prompts/ locale/ skills/ tests/` 与 `cordis.patch.yml` 等），所以 `build.ps1` 只做三件事：
 
-1. `git clone --filter=blob:none --no-checkout <source> upstream`（已存在则跳过）；
-2. `git fetch --tags --force` 后 `git checkout --force --detach <commit>`——按 commit 取，不跟分支；
-3. `pnpm install --frozen-lockfile`（无 pnpm 时 `npx --yes pnpm@11.7.0 install --frozen-lockfile`）；
-4. `pnpm build`（tsdown），然后确认 `upstream\lib\index.js` 与 `upstream\cordis.patch.yml` 存在。
+1. `pnpm install --frozen-lockfile`（无 pnpm 时 `npx --yes pnpm@11.7.0 install --frozen-lockfile`）；
+2. `pnpm build`（tsdown），产物落在仓库根的 `lib\`；
+3. 校验 `lib\index.js` 与 `cordis.patch.yml` 存在，并打印两个产物的体积。
+
+`-SkipInstall` 跳过第 1 步（依赖没变时），`-Force` 先删 `node_modules` 与 `lib` 再从头装。
+`vendor\upstream.lock.json` 只记录基线 commit，不参与构建。
 
 两点行为说明：
 
-- **fetch 失败不等于构建失败。** 第 2 步的 `git fetch` 只是为了让新 pin 的 commit 可达。断网或网络抖动时，
-  脚本会用 `git cat-file -e <commit>^{commit}` 判断这个 commit 是否已在本地副本里；在就降级成警告继续构建，
-  不在才报错退出。所以改完 `vendor\upstream.lock.json` 之后第一次构建仍然需要联网。
+- **构建不再需要联网。** 源码在仓库里，依赖走 pnpm 缓存或 registry；只有 `sync-upstream.ps1` 需要联网。
 - **stderr 里有输出不是错误。** pnpm 与 tsdown 会往 stderr 写进度和建议（例如「建议用 ESM 格式」）。
   脚本默认 `$ErrorActionPreference = 'Stop'`，合并 `2>&1` 时这些行会变成 `ErrorRecord` 把脚本直接终止，
   看起来像构建失败。`build.ps1` 只在发起 pnpm 的那一段把错误偏好放宽，成败仍由退出码判定。
 
-产物不提交进仓库：`upstream/` 在 `.gitignore` 里。换机器、清目录之后重跑一次即可复现同一个 commit。
+产物不提交进仓库：`lib/` 与 `coverage/` 都在 `.gitignore` 里。换机器、清目录之后重跑一次即可复现同一份产物。
 
 ## 2. 建独立 profile
 
@@ -73,10 +73,10 @@ dsh superagent --from-default-profile web --dump-config > $null
 ## 3. 挂 bundle
 
 ```powershell
-dsh plugin --profile superagent add "link:C:\path\to\dsh-superagent-windows\upstream"
+dsh plugin --profile superagent add "link:C:\path\to\dsh-superagent-windows"
 ```
 
-用 `link:` 而不是包名：上游是 `private: true`，没有发布会，`link:` 直接把构建产物挂进 profile 的插件图。
+用 `link:` 而不是包名：这个包是 `private: true`，没有发布，`link:` 直接把仓库（构建产物 `lib/`）挂进 profile 的插件图。
 挂完之后 `%USERPROFILE%\.dsh\profiles\superagent\cordis.patch.yml` 里应该出现 `id: dsh-superagent`；
 `doctor.ps1` 有一项专门查这个。
 
@@ -161,15 +161,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\register-task.ps1
 # 2. 备份数据库 —— 新版本迁移过的库旧版本打不开，回滚只能靠这份备份
 Copy-Item "$env:USERPROFILE\.dsh\state\superagent\orchestrator.sqlite" "$env:USERPROFILE\.dsh\state\superagent\orchestrator.sqlite.bak" -Force
 
-# 3. 改 vendor\upstream.lock.json 的 commit，重构建
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build.ps1 -Force
+# 3. 拉新基线、看差异、手动合（上游编辑不会自动套用）
+git pull
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\sync-upstream.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\build.ps1
 
 # 4. 重启并看状态
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dsh-superagent.ps1 restart
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dsh-superagent.ps1 status
 ```
 
-回滚：把 `.bak` 覆盖回去，`vendor\upstream.lock.json` 改回旧 commit，`build.ps1 -Force`，再 `restart`。
+回滚：把 `.bak` 覆盖回去，`git revert` 对应的合并提交（源码在仓库里，回滚就是回滚代码），`build.ps1`，再 `restart`。
 
 ## 装失败时先看这里
 

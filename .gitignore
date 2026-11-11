@@ -1,5 +1,9 @@
-# 上游代码的本地构建副本（用 scripts/build.ps1 拉取，不入库）
+# 上游对照克隆（scripts/sync-upstream.ps1 拉取，只用来比对，不入库）
 /upstream/
+
+# 构建产物（pnpm build 生成）
+/lib/
+/coverage/
 
 # 运行期产物：日志、PID、控制文件、数据库
 /.artifacts/
