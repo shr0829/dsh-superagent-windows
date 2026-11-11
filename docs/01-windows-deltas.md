@@ -1,6 +1,6 @@
 # 01 · Windows 与上游的差异清单
 
-上游只发布了 POSIX 部署路径：控制脚本假设 `fcntl`、`tmux`、`ps`、`SIGINT`，执行环境假设 `sh`，账号包装器是 `#!/bin/sh`，`docs/006-deployment.md` 全文没有出现 Windows / win32 / pwsh 中的任何一个词。本仓库不改上游一行代码：上游按 commit 锁死后原样构建（`vendor/upstream.lock.json`），差异全部落在 `scripts/` 与 `config/`。下面每条都按同一结构写——上游怎么做（文件:行）→ Windows 上为什么不行 → 本仓库怎么替代（脚本:行）。
+上游只发布了 POSIX 部署路径：控制脚本假设 `fcntl`、`tmux`、`ps`、`SIGINT`，执行环境假设 `sh`，账号包装器是 `#!/bin/sh`，`docs/006-deployment.md` 全文没有出现 Windows / win32 / pwsh 中的任何一个词。本仓库把上游源码收入仓库（基线记在 `vendor/upstream.lock.json`），差异分两类：部署侧的 Windows 等价物落在 `scripts/` 与 `config/`，逻辑侧的改造留在源码里并按 `[fork]` 标注。下面每条都按同一结构写——上游怎么做（文件:行）→ Windows 上为什么不行 → 本仓库怎么替代（脚本:行）。
 
 | # | 上游依赖 | Windows 上的问题 | 本仓库替代 |
 | --- | --- | --- | --- |
@@ -147,7 +147,7 @@ Windows 上按同一顺序，命令换成脚本：
 
 1. `scripts\dsh-superagent.ps1 stop`，确认退出码 0、`status` 的 `pids` 为空
 2. `Copy-Item <stateDir>\orchestrator.sqlite <stateDir>\backup\orchestrator-<yyyyMMdd-HHmmss>.sqlite`
-3. 改 `vendor/upstream.lock.json` 的 commit → `scripts\build.ps1`（重新 checkout、`pnpm install --frozen-lockfile`、`pnpm build`）
+3. 改 `vendor/upstream.lock.json` 的 commit → `scripts\sync-upstream.ps1`（拉对照克隆、列出差异）→ 手动合并 → `pnpm test`
 4. `scripts\dsh-superagent.ps1 restart`，退出码 0 才算完成；不健康就看 `status` 的 `errors` 与 `logs`
 
 回滚的关键约束：数据库被新版本迁移后旧版本打不开（`docs/006-deployment.md:242`）。所以回滚必须先停服务、再用备份覆盖数据库，光把 lock 文件改回旧 commit 不够——代码回去了，schema 没回去。

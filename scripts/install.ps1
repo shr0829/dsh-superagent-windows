@@ -1,11 +1,11 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    一键安装：构建上游 → 建独立 profile → 挂 bundle → 写机器配置 → 生成账号包装器。
+    一键安装：构建 bundle → 建独立 profile → 挂 bundle → 写机器配置 → 生成账号包装器。
 
 .DESCRIPTION
     等价于上游 docs/006-deployment.md 的 Install 段，把 POSIX 命令换成 Windows 上的等价操作：
-      git clone + pnpm install + pnpm build   →  scripts\build.ps1（提交由 vendor\upstream.lock.json 钉死）
+      pnpm install + pnpm build               →  scripts\build.ps1（源码已入仓，基线记在 vendor\upstream.lock.json）
       dsh superagent --from-default-profile   →  同一命令，只是 profile 名与路径是 Windows 的
       dsh plugin add link:$PWD                →  同一命令，路径用绝对 Windows 路径
       复制 examples 的 profile patch          →  在已有 patch 上追加两段 override（不覆盖已有内容）
@@ -28,7 +28,7 @@ param(
     [string]$FromProfile = 'web',
 
     [string]$DshVersion = '0.2.1-rc.3',
-    [string]$Upstream = '',
+    [string]$Bundle = '',
     [switch]$SkipBuild,
     [switch]$SkipPlugin,
     [switch]$SkipCli,
@@ -40,7 +40,7 @@ $ErrorActionPreference = 'Stop'
 Set-ConsoleUtf8
 
 $root = Split-Path -Parent $PSScriptRoot
-if (-not $Upstream) { $Upstream = Join-Path $root 'upstream' }
+if (-not $Bundle) { $Bundle = $root }
 $dshHome = if ($env:DSH_HOME) { $env:DSH_HOME } else { Join-Path $env:USERPROFILE '.dsh' }
 $profileDir = Join-Path $dshHome "profiles\$Profile"
 $profilePatch = Join-Path $profileDir 'cordis.patch.yml'
@@ -77,13 +77,13 @@ if ($StateDir -match '\s') { throw "StateDir must not contain spaces: $StateDir"
 
 # ---------------------------------------------------------------- 1. 构建上游
 if (-not $SkipBuild) {
-    Step 'build upstream'
-    & (Join-Path $PSScriptRoot 'build.ps1') -Destination $Upstream
+    Step 'build bundle'
+    & (Join-Path $PSScriptRoot 'build.ps1')
     Assert-ExitCode 'build.ps1'
 }
 foreach ($artifact in @('lib\index.js', 'cordis.patch.yml', 'package.json')) {
-    if (-not (Test-Path -LiteralPath (Join-Path $Upstream $artifact))) {
-        throw "upstream checkout at $Upstream has no $artifact; run scripts\build.ps1 first"
+    if (-not (Test-Path -LiteralPath (Join-Path $Bundle $artifact))) {
+        throw "bundle at $Bundle has no $artifact; run scripts\build.ps1 first"
     }
 }
 
@@ -116,8 +116,8 @@ if (-not $SkipPlugin) {
     if ($linked) {
         Write-Output "dsh-superagent is already referenced by $profilePatch"
     } else {
-        & dsh plugin --profile $Profile add "link:$Upstream"
-        Assert-ExitCode "dsh plugin --profile $Profile add link:$Upstream"
+        & dsh plugin --profile $Profile add "link:$Bundle"
+        Assert-ExitCode "dsh plugin --profile $Profile add link:$Bundle"
     }
 }
 
@@ -171,4 +171,4 @@ Write-Output "3) powershell -NoProfile -ExecutionPolicy Bypass -File scripts\reg
 Write-Output "4) powershell -NoProfile -ExecutionPolicy Bypass -File scripts\doctor.ps1 -Profile $Profile -Url http://127.0.0.1:$Port"
 Write-Output ''
 Write-Output "stateDir: $StateDir"
-Write-Output "bundle:   $Upstream"
+Write-Output "bundle:   $Bundle"

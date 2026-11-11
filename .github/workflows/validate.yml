@@ -37,12 +37,12 @@ jobs:
             dir=$(dirname "$file")
             while IFS= read -r link; do
               [ -z "$link" ] && continue
-              case "$link" in http*|\#*|mailto:*) continue ;; esac
               target="${link%%#*}"
               if [ ! -e "$dir/$target" ] && [ ! -e "$target" ]; then
                 echo "missing: $file -> $link"
                 fail=1
               fi
-            done < <(grep -oE '\]\([^)]+\)' "$file" | sed -E 's/^\]\(//; s/\)$//')
+            # 占位符 <...> 和 http/mailto/纯锚点不是本地文件，在这里滤掉
+            done < <(grep -oE '\]\([^)]+\)' "$file" | sed -E 's/^\]\(//; s/\)$//' | grep -vE '^(https?:|#|mailto:|<)' || true)
           done < <(find . -name '*.md' -not -path './upstream/*' -print0)
           exit $fail

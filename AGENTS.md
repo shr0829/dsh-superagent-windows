@@ -18,8 +18,11 @@
    只 `WriteAllBytes(GetBytes($text))` 得到的文件仍然没有 BOM。
 2. **只用 5.1 有的语法与参数。** 禁止 `??`、`?:`、`-AsHashtable`、`-Encoding utf8NoBOM`、`Invoke-RestMethod -NoProxy`。
    文件读写走 `common.ps1` 的 `Read-Utf8Text` / `Write-Utf8Text`；HTTP 走 `Invoke-JsonGet`。
-3. **不复制上游源码。** `upstream/` 是构建产物，被 `.gitignore` 忽略；上游版本只由 `vendor/upstream.lock.json` 决定。
-   要升级上游就改那个 commit，别改 `upstream/` 里的文件。
+3. **上游源码入仓，改动要可分辨。** `src/ prompts/ locale/ skills/ tests/` 与 `cordis.patch.yml` 等文件来自上游
+   `dsh-superagent-prototype`（见 `NOTICE`），基线 commit 记在 `vendor/upstream.lock.json`。
+   改这些文件时：commit message 里写 `[fork]` 开头的一行说明改了什么、为什么；不要整文件重排（格式化、重命名）
+   把上游改成无法 diff 的样子。`upstream/` 是对照克隆，被 `.gitignore` 忽略，只给 `scripts/sync-upstream.ps1` 用。
+   升级上游：换 lock 里的 commit → `sync-upstream.ps1` 看差异 → 手动合 → `pnpm test` 全绿再提交。
 4. **退出码不许改语义。** 0 正常、1 未运行/双实例/runtime 报错、2 非 runtime 组件报错、3 等待 setup。
    `watchdog.ps1` 与计划任务按这四个码分流，改成二值退出码等于让巡检失效。
 5. **不打印凭据。** 不要 `echo` `gh` token、`.credentials.yaml` 内容、`lark` app secret。`gh-agent` / `lark-bot`
@@ -40,14 +43,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\doctor.ps1          
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dsh-superagent.ps1 status
 ```
 
-`build.ps1` 只在改了 `vendor/upstream.lock.json` 或构建流程时才需要重跑（要联网、要几分钟）。
+`build.ps1` 在改了源码或依赖后才需要重跑；`scripts\sync-upstream.ps1` 只在升级上游基线时要联网。
 
 ## 目录约定
 
 - `scripts/` 放可执行脚本，一个动作一个文件；共用函数只进 `scripts/lib/common.ps1`，别再开新的 lib 文件。
 - `config/` 放"要给用户抄进自己环境"的东西：样板 YAML、prepare 命令。这里的文件要能被直接改路径后使用。
-- `docs/` 按主题分文件，`00-*` 到 `04-*` 的编号是阅读顺序；新增文档给下一个编号，不要插号。
-- `vendor/upstream.lock.json` 是构建的唯一事实来源，改它等于换上游版本，commit message 要写清换了什么。
+- `docs/` 按主题分文件，编号是阅读顺序；新增文档给下一个编号，不要插号。`00`–`04` 是部署侧，`05`–`06` 是开发侧（设计与测试基线）。
+- `vendor/upstream.lock.json` 是上游基线的唯一记录，改它等于换基线，commit message 要写清换了什么；它不参与构建。
 
 ## 提交
 

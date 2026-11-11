@@ -1,0 +1,26 @@
+dsh-superagent-windows
+======================
+
+This repository vendors the source of DeepSeek's dsh-superagent research
+prototype and continues development on it. The vendored files are:
+
+    src/  prompts/  locale/  skills/  tests/
+    cordis.patch.yml  tsdown.config.ts  vitest.config.ts  tsconfig.json
+    package.json  pnpm-lock.yaml  SETUP.md
+
+Upstream project
+----------------
+dsh-superagent-prototype
+https://github.com/deepseek-ai/dsh-superagent-prototype
+Copyright (c) DeepSeek
+Licensed under the MIT License.
+
+The exact revision vendored here is recorded in vendor/upstream.lock.json
+(commit, commit date, package name and version). Files copied from upstream
+keep their original contents; changes made in this repository are marked
+with a `[fork]` note in the commit message and can be reviewed with
+scripts/sync-upstream.ps1, which diffs the vendored tree against the pinned
+upstream revision.
+
+This repository's own additions (scripts/, config/, docs/, NOTICE) are
+Copyright (c) 2026 shr and licensed under the MIT License, see LICENSE.

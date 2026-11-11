@@ -29,7 +29,7 @@ PowerShell 控制脚本、计划任务保活、bundle 挂载、机器配置、�
 git clone https://github.com/shr0829/dsh-superagent-windows.git
 cd dsh-superagent-windows
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\doctor.ps1      # 先体检，看哪些项 FAIL
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1     # 构建上游 + 建 profile + 挂 bundle + 写配置
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install.ps1     # 构建 bundle + 建 profile + 挂 bundle + 写配置
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\dsh-superagent.ps1 start
 start http://127.0.0.1:3082/orchestrator
 ```
@@ -37,7 +37,7 @@ start http://127.0.0.1:3082/orchestrator
 `install.ps1` 做的六件事，与上游 `docs/006-deployment.md` 的 Install 段一一对应：
 
 1. preflight：Node、git、`dsh`，`stateDir` 必须是绝对路径且不含空格（`worker-bin` 要拼进 PATH）；
-2. `scripts\build.ps1`：按 `vendor\upstream.lock.json` 拉取上游 commit，`pnpm install` + `pnpm build`，产物落在 `upstream\`；
+2. `scripts\build.ps1`：源码已随仓库提供，`pnpm install --frozen-lockfile` + `pnpm build`，产物落在 `lib\`；
 3. `dsh <profile> --from-default-profile web --dump-config`：建独立 profile（默认名 `superagent`），操作者自己的 Session 不受影响；
 4. `dsh plugin --profile <profile> add link:<checkout>`：把构建产物作为 bundle 挂进 profile；
 5. 往 `cordis.patch.yml` 追加机器配置：`webserver` 绑 `127.0.0.1:3082`，`dsh-superagent.stateDir`；
@@ -49,20 +49,21 @@ start http://127.0.0.1:3082/orchestrator
 scripts\
   dsh-superagent.ps1    服务控制：status / start / stop / restart / logs / open / doctor
   install.ps1           一键安装（等价上游 Install 段）
-  build.ps1             按 lock 文件拉取并构建上游，产出 upstream\lib
+  build.ps1             本地构建，产出 lib\（约 2 kB 入口 + client）
   doctor.ps1            只读体检，15 项 PASS/WARN/FAIL
   watchdog.ps1          每小时巡检判断（无 agent 也能跑）
   register-task.ps1     注册"登录启动 + 每小时巡检"两个计划任务
   unregister-task.ps1   删除计划任务
   new-agent-cli.ps1     生成 gh-agent.cmd / lark-bot.cmd 凭据包装器
   test-scripts.ps1      自检：BOM、语法、语法树引用的文件是否存在
-  fix-encoding.ps1      编辑器丢 BOM 之后补回来（统一成 UTF-8 with BOM + CRLF）
+  fix-encoding.ps1      编辑器丢 BOM 之后补回来（统一成 UTF-8 with BOM + CRLF)
+  sync-upstream.ps1     拉上游基线作对照克隆，报出本仓库改了哪些文件
   lib\common.ps1        共用：UTF-8 无 BOM 读写、免代理 HTTP GET、版本号解析
 config\
   profile.cordis.patch.yml   机器配置样板（带注释）
   prepare-worktree.ps1       Execution 的 prepare 命令（git worktree，PowerShell 版）
 vendor\
-  upstream.lock.json    上游 commit 与版本约束，构建的唯一来源
+  upstream.lock.json    上游基线 commit 与版本约束（只用于对照与升级，不参与构建）
 docs\
   00-overview.md        这个系统在解决什么问题：五个模块、两级过滤、订阅直通、上下文档位
   01-windows-deltas.md  Windows 与原型的 12 处差异，以及为什么必须这样改
@@ -70,6 +71,7 @@ docs\
   03-operate.md         运维：日常命令、计划任务、退出码、排障对照表
   04-settings-api.md    Management API 与四块 Settings 的 Windows 取值
   05-design.md          并发与解耦的设计共识：分区、消息、锁、验收判据、未决项
+  06-test-baseline.md    Windows 上的测试基线：43 条失败的分类与分支 2 的起点
 ```
 
 ## 三条必须知道的约束
@@ -96,9 +98,10 @@ HTTP 用 `HttpWebRequest` 而不是 `Invoke-RestMethod -NoProxy`（5.1 没有这
 - `doctor.ps1` 15 项检查全部按预期给出 PASS/WARN（`dsh 0.2.2-rc.1`、Node 24.18、git 2.56）；
 - `dsh-superagent.ps1 status` 在没有服务时输出完整 JSON 并以 1 退出，`logs` 以 0 退出；
 - 所有脚本通过 5.1 语法树解析（`scripts\test-scripts.ps1`）；
-- `build.ps1` 能从锁定 commit 完整跑通：clone → `npx pnpm@11.7.0 install --frozen-lockfile`（234 个包）→ `tsdown`
-  产出 `upstream\lib\index.js`（450.26 kB）与 `lib\client.js`（359.28 kB），退出码 0；
-  断网时只要本地已有该 commit，fetch 失败会退化成警告而不是中断构建。
+- `build.ps1` 在仓库根跑通：`npx pnpm@11.7.0 install --frozen-lockfile` → `tsdown` 产出 `lib\index.js`
+  （450.26 kB）与 `lib\client.js`（359.28 kB），退出码 0；`upstream\` 只是 `sync-upstream.ps1` 的对照克隆，不参与构建；
+- `pnpm test` 在本机跑出 **1154 通过 / 43 失败（9 个文件）**，失败全部来自 POSIX 假设（`spawn sh`、信号、`tmux`、
+  权限位、上游 docs 未入仓）。清单与分类见 `docs\06-test-baseline.md`——那是分支 2 的起点，不是终点。
 
 尚未在本机跑通的（`docs\01-windows-deltas.md` 末尾有完整清单）：真实 GitHub Issue → Ticket 的端到端链路、
 计划任务在锁屏/睡眠跨过触发点后的补跑行为、飞书 Source（未装 `lark-cli`）。
@@ -106,9 +109,12 @@ HTTP 用 `HttpWebRequest` 而不是 `Invoke-RestMethod -NoProxy`（5.1 没有这
 ## 与上游的关系
 
 上游是研究原型，不是产品：`private: true`，没有 npm 包，`package.json` 里的 `engines.dsh` 钉在 `^0.2.1-alpha.2`。
-本仓库不复制上游源码，只锁定 commit（`vendor\upstream.lock.json`，当前 `8c32a9dc5d72c033816c6a8110b37f40cf94fba4`），
-构建时拉取。上游更新后：改 `vendor\upstream.lock.json` 的 commit → `scripts\build.ps1` → 重启 profile。
+基线 commit 记在 `vendor\upstream.lock.json`（当前 `8c32a9dc5d72c033816c6a8110b37f40cf94fba4`），署名见 `NOTICE`。
+
+升级上游的流程：改 lock 里的 commit → `scripts\sync-upstream.ps1`（拉对照克隆并列出差异）→ 手动合并 →
+`pnpm test` 全绿 → 提交。上游编辑不会被自动套用，这正是为什么源码入仓而不是构建时拉取：
+三条开发分支要改的都是这些文件。
 
 ## 许可
 
-本仓库脚本与文档：MIT。上游代码遵循其自身许可（MIT），由构建流程按 commit 拉取，不进入本仓库。
+本仓库脚本与文档：MIT。上游 dsh-superagent 代码同为 MIT，随仓库提供，署名与基线见 `NOTICE` 与 `vendor\upstream.lock.json`。
