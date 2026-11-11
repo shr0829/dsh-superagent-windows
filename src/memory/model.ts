@@ -23,6 +23,8 @@ export interface MemoryRecord {
   thread?: string
   /** The ticket the memory came out of, when it came out of one. */
   ticketId?: string
+  /** The memories this one replaced, when it was written by merging them; their bodies are no longer stored. */
+  supersedes?: string[]
 }
 
 export const MEMORY_KINDS = ['note', 'decision', 'fact', 'lesson'] as const
@@ -58,6 +60,7 @@ export type MemoryDraft = Pick<MemoryRecord, 'title' | 'text'> & Partial<Omit<Me
 export function memoryRecord(draft: MemoryDraft, at = new Date().toISOString(), id = memoryId()): MemoryRecord {
   const clean = (values: readonly string[] | undefined): string[] => [...new Set((values ?? []).map(value => value.trim()).filter(Boolean))]
   return { id: draft.id?.trim() || id, title: draft.title.trim(), text: draft.text, at: draft.at ?? at, kind: draft.kind ?? 'note',
-    tags: clean(draft.tags), next: clean(draft.next), ...draft.source ? { source: draft.source } : {},
+    tags: clean(draft.tags), next: clean(draft.next), ...clean(draft.supersedes).length ? { supersedes: clean(draft.supersedes) } : {},
+    ...draft.source ? { source: draft.source } : {},
     ...draft.thread ? { thread: draft.thread } : {}, ...draft.ticketId ? { ticketId: draft.ticketId } : {} }
 }

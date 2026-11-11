@@ -14,7 +14,8 @@ export function renderMemory(record: MemoryRecord): string {
   const fields: [string, unknown][] = [['id', record.id], ['title', record.title], ['at', record.at], ['kind', record.kind],
     ...record.thread ? [['thread', record.thread] as [string, unknown]] : [],
     ...record.ticketId ? [['ticketId', record.ticketId] as [string, unknown]] : [],
-    ['tags', record.tags], ['next', record.next], ...record.source ? [['source', record.source] as [string, unknown]] : []]
+    ['tags', record.tags], ['next', record.next], ...record.supersedes?.length ? [['supersedes', record.supersedes] as [string, unknown]] : [],
+    ...record.source ? [['source', record.source] as [string, unknown]] : []]
   const front = fields.map(([name, value]) => `${name}: ${JSON.stringify(value)}`).join('\n')
   return `---\n${front}\n---\n${record.text}\n`
 }
@@ -81,5 +82,12 @@ export class MarkdownMemory implements MemoryStore {
       } catch { /* A file this store did not write, or one being replaced, is skipped. */ }
     }
     return records
+  }
+
+  remove(id: string): boolean {
+    const file = join(this.directory, fileOf(id))
+    if (!existsSync(file)) return false
+    rmSync(file, { force: true })
+    return true
   }
 }

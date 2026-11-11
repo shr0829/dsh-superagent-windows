@@ -26,6 +26,8 @@ import { overview } from './views/overview.ts'
 import { settingsView } from './views/settings.ts'
 import { sourcesStatus, type SetupState } from './views/sources.ts'
 import { decisionList, search, threadDetail, threadList } from './views/threads.ts'
+import { memoryDetail, memoryList } from './views/memory.ts'
+import { MEMORY_KINDS, MEMORY_REF, type Memory } from '../memory/index.ts'
 import { executorLoad, ticketDetail, ticketList } from './views/tickets.ts'
 
 export interface HttpHost {
@@ -36,6 +38,8 @@ export interface HttpHost {
   readonly prompts: Pick<Prompts, 'current' | 'version' | 'history' | 'preview' | 'save' | 'defaultChanged'>
   readonly sessions: Pick<Sessions, 'status' | 'notify' | 'delivery'>
   readonly settings: Pick<Settings, 'view' | 'save' | 'pause' | 'sync' | 'refreshLabels'>
+  /** Durable chain memory; the panel lists, searches, merges and forgets through it. */
+  readonly memory: Pick<Memory, 'get' | 'list' | 'search' | 'merge' | 'remove'>
   readonly engine: EngineForPeople
   readonly executor: Pick<DshExecutor, 'activeCount'>
   readonly health: Record<string, Health>
@@ -147,6 +151,13 @@ const PromptsQuery = z.object({ revision: count.optional(), offset: count.defaul
 const SourceBlock = z.templateLiteral(['source:', z.string().regex(/^[a-z][a-z0-9-]*$/)])
 const SettingsBlockSchema = z.union([z.enum(['policy', 'eval', 'executor']), SourceBlock])
 const SaveRequest = z.object({ value: z.unknown(), revision: z.number().int().nonnegative() })
+const MemoriesQuery = z.object({ q: z.string().max(200).default(''), offset, limit: limit(30, 200) })
+const MemoryMergeBody = z.object({
+  ids: z.array(z.string().min(1).max(40)).min(2).max(20),
+  title: z.string().min(1).max(200).optional(), text: z.string().min(1).max(20_000).optional(),
+  kind: z.enum(MEMORY_KINDS).optional(), tags: z.array(z.string().max(40)).max(20).optional(),
+  next: z.array(z.string().regex(MEMORY_REF)).max(50).optional(),
+}).strict()
 
 function routes(runtime: HttpHost): Routes {
   const { store } = runtime
@@ -185,6 +196,23 @@ function routes(runtime: HttpHost): Routes {
       return decisionList(views(runtime), kind.split(',').filter(Boolean), offset, limit, since)
     },
     'POST decisions/:id/dismiss': ({ params }) => { runtime.engine.dismiss(params.id); return { dismissed: true } },
+    'GET memories': ({ query }) => {
+      const { q, offset, limit } = MemoriesQuery.parse(query)
+      return memoryList(runtime, q, offset, limit)
+    },
+    'GET memories/:id': ({ params }) => {
+      const detail = memoryDetail(runtime, params.id)
+      if (!detail) throw new RouteError(404, 'Memory not found')
+      return detail
+    },
+    'POST memories/merge': async ({ body }) => {
+      const request = MemoryMergeBody.parse(await body(64_000))
+      const present = request.ids.filter(id => runtime.memory.get(id))
+      if (present.length < 2) throw new RouteError(400, 'Merge needs at least two existing memories')
+      const { record, removed, backends } = runtime.memory.merge(present, request)
+      return { ...memoryDetail(runtime, record.id)!, removed, backends }
+    },
+    'POST memories/:id/forget': ({ params }) => runtime.memory.remove(params.id),
     'GET tickets': ({ query }) => {
       const { state, offset, limit } = TicketsQuery.parse(query)
       return ticketList(views(runtime), state, offset, limit)

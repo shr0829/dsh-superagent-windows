@@ -21,6 +21,7 @@ import { feishuKind } from '../../src/sources/feishu.ts'
 import { githubKind } from '../../src/sources/github.ts'
 import type { Health } from '../../src/sources/host.ts'
 import type { SourceKind } from '../../src/sources/kind.ts'
+import type { MemoryDetailView } from '../../src/app/views/memory.ts'
 import { testDeployment } from './deployment.ts'
 
 export const MEMBER = 'ou_alice'
@@ -91,6 +92,8 @@ export interface PanelServer {
   prompts: PromptsView
   tickets: { open: TicketRow[]; ended: TicketRow[] }; ticketDetails: Record<string, TicketPageView>
   threads: ThreadRow[]
+  /** Durable memories the panel lists, searches, opens, merges and forgets. */
+  memories: MemoryDetailView[]
   threadPages: (key: string, query: { before?: string; around?: string }) => ThreadPageView | undefined
   person: TicketRow[]; search: Pick<ApiResponse<'GET search'>, 'items' | 'threads'>; history: HistoryView
   requests: { path: string; method: string; body?: unknown }[]
@@ -246,8 +249,13 @@ function initial(): PanelServer {
   const reply = { source: 'feishu', url: 'https://applink.feishu.cn/client/chat/open?openChatId=oc_1', label: { zh: '飞书消息',
     en: 'Feishu message' } }
   const defaults = { revision: 0, previousRevision: null, savedAt: '', source: 'defaults' }
+  const remembered = (id: string, title: string, text: string): MemoryDetailView => ({ memory_id: id, title, kind: 'note',
+    at: '2026-11-11T08:00:00.000Z', tags: ['chain'], next: [], chars: text.length, links: [], supersedes: [], resource: `memory/${id}`,
+    offset: 0, total_chars: text.length, next_offset: null, text })
   return {
     health: {}, down: false, pending: 0, opened: [], requests: [], misuse: [], queued: new Set(), dropped: [], failing: [],
+    memories: [remembered('mem_a', '链式记忆先存一件事', '第一跳：这条记忆指向下一跳。'),
+      remembered('mem_b', '面板记忆页', '在面板里列出、检索、合并与遗忘。')],
     setup: { machine: MACHINE, problem: null, feishuProblem: null,
       accounts: { repository: 'acme/widgets', agent: 'agent-bot', feishu: { appId: 'cli_bot', brand: 'feishu', botId: 'ou_bot',
         name: 'Widgets Bot' } } },
@@ -324,6 +332,25 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
     ({ items: query.kind === 'ignore' ? [] : [acceptDecision()], next_offset: null }) },
   'POST decisions/:id/dismiss': { answer: ({ params }) => params.id === 'u1' ? { dismissed: true } : refuse(404,
     'Unavailable Eval not found') },
+  'GET memories': { query: ['q', 'offset', 'limit'], answer: ({ query }) =>
+    ({ items: server.memories.filter(item => !query.q || item.title.includes(query.q))
+      .map(({ memory_id, title, kind, at, tags, next, chars }) => ({ memory_id, title, kind, at, next, chars,
+        ...tags ? { tags } : {}, read: `memory/${memory_id}` })), next_offset: null }) },
+  'GET memories/:id': { answer: ({ params }) => server.memories.find(item => item.memory_id === params.id) ?? refuse(404,
+    'Memory not found') },
+  'POST memories/merge': { body: true, answer: ({ body }) => {
+    const ids = (body as { ids: string[] }).ids
+    const merged = server.memories.find(item => item.memory_id === ids[0])
+    if (!merged || ids.length < 2) return refuse(400, 'Merge needs at least two existing memories')
+    const next = { ...merged, supersedes: ids, removed: ids, backends: ['database', 'markdown'] as ('database' | 'markdown')[] }
+    server.memories = [next, ...server.memories.filter(item => !ids.includes(item.memory_id))]
+    return next
+  } },
+  'POST memories/:id/forget': { answer: ({ params }) => {
+    const found = server.memories.some(item => item.memory_id === params.id)
+    server.memories = server.memories.filter(item => item.memory_id !== params.id)
+    return { id: params.id, removed: found }
+  } },
   'GET tickets': { query: ['state', 'offset', 'limit'], answer: ({ query }) => page(server.tickets[query.state === 'ended' ? 'ended'
     : 'open']) },
   'GET tickets/:id': { answer: ({ params }) => server.ticketDetails[params.id] ?? refuse(404, 'Ticket not found') },
