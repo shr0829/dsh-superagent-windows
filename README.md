@@ -69,6 +69,7 @@ docs\
   02-install.md         安装：前置、分步、验证、升级与回滚
   03-operate.md         运维：日常命令、计划任务、退出码、排障对照表
   04-settings-api.md    Management API 与四块 Settings 的 Windows 取值
+  05-design.md          并发与解耦的设计共识：分区、消息、锁、验收判据、未决项
 ```
 
 ## 三条必须知道的约束
