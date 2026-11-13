@@ -301,6 +301,11 @@ export interface Ticket {
   updatedAt: string
   /** The Triggers it was accepted from: the one that started it, and the batch its Eval held. */
   origin: { triggerId: string; triggerIds: string[] }
+  /**
+   * The workspace its Trigger came from, which names the router that serves it: one router per workspace. Absent for work
+   * that came from a Source without a workspace (GitHub, Feishu), which the panel groups under the default router.
+   */
+  workspace?: string
   /** What its Executor chose: its short name, directory and assignment text. */
   execution?: Execution
   /** The latest failed delivery of an Input to its worker, until a delivery succeeds. */

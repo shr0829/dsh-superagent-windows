@@ -42,8 +42,11 @@ export class Tickets extends EnginePart {
     // Fall back to the last trigger for Evals recorded before `primary` existed.
     const primary = this.repo.triggers.get(evaluation.primary ?? triggerIds.at(-1)!)
     const origin = { triggerId: primary?.id ?? triggerIds[0]!, triggerIds }
+    // A workspace-scoped Trigger, such as a Session's message, names the router that serves it; work from a Source without
+    // one (GitHub, Feishu) has no router of its own and the panel groups it under the default router.
+    const workspace = typeof primary?.meta.workspace === 'string' && primary.meta.workspace ? primary.meta.workspace : undefined
     let ticket: Ticket = { id, title: outcome.title, decisionId, mandate, channels: [], assignments: [], inputs: [], undelivered: [],
-      createdAt: at, updatedAt: at, origin }
+      createdAt: at, updatedAt: at, origin, ...workspace ? { workspace } : {} }
     for (const triggerId of triggerIds) {
       const channel = this.repo.triggers.get(triggerId)?.channel
       if (channel && !ticket.channels.some(item => sameChannel(item, channel))) ticket.channels.push(channel)

@@ -8,8 +8,8 @@ import type { ConfigForm, ConfigFormSnapshot } from '@deepseek-ai/dsh-client-ui-
 import type { Api, ApiResponse, RouteParams } from '../../src/app/api.ts'
 import { SKILL_NAME, SKILL_PREFIX, TEAM_SECTIONS, builtInBase, builtInPart, builtInParts, composePrompt, composeSkill, defaultPrompts,
   environmentSection, policySection, promptParts } from '../../src/app/prompts.ts'
-import type { DroppedReply, HistoryView, Problem, PromptsView, SetupView, SourceStatusRow, SourceView, StateView, ThreadPageView,
-  ThreadRow, TicketPageView,
+import type { DroppedReply, HistoryView, Problem, PromptsView, RouterPageView, RouterRow, SetupView, SourceStatusRow, SourceView,
+  StateView, ThreadPageView, ThreadRow, TicketPageView,
   TicketRow, TicketStage,
   TriggerRow } from '../../src/client/api.ts'
 import { SETUP_FIELDS } from '../../src/deployment.ts'
@@ -91,6 +91,8 @@ export interface PanelServer {
   settings: Settings; revisions: Record<string, number>
   prompts: PromptsView
   tickets: { open: TicketRow[]; ended: TicketRow[] }; ticketDetails: Record<string, TicketPageView>
+  /** Routers the panel lists, one per workspace, and the detail of each. */
+  routers: RouterRow[]; routerPages: Record<string, RouterPageView>
   threads: ThreadRow[]
   /** Durable memories the panel lists, searches, opens, merges and forgets. */
   memories: MemoryDetailView[]
@@ -265,6 +267,10 @@ function initial(): PanelServer {
       defaults: defaultPrompts(), parts: Object.entries(builtInParts()).map(([key, part]) => ({ key, ...part, base: builtInBase(part.text) })),
       defaultChanged: [], revisions: [{ ...defaults, changed: [] }], sessions: [], notificationPending: false, next_offset: null },
     tickets: { open: [ticketSummary()], ended: [ended] }, ticketDetails: { t1: ticketDetail() },
+    routers: [{ id: 'r1', workspace: '/w/app', title: 'app', total: 2, open: 1, running: 1, lastAt: '2026-09-23T00:00:00Z' }],
+    routerPages: { r1: { id: 'r1', workspace: '/w/app', title: 'app', total: 1, open: 1, running: 1, lastAt: '2026-09-23T00:00:00Z',
+      tickets: [{ ...ticketSummary(), worker: { sessionId: 'worker-t1', running: true, report: 'working on it' } }],
+      threads: [{ key: 'github:42', title: '#42 Fix login', stage: 'subscribed', subscriptions: 1 }] } },
     threads: [threadSummary()], threadPages: threadPage,
     person: [ticketSummary({ attention: { id: 'q1', question: '需要确认按钮颜色' }, note: { text: '需要确认按钮颜色', error: false }, reply },
       { stage: 'person', action: 'answer' }),
@@ -354,6 +360,8 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET tickets': { query: ['state', 'offset', 'limit'], answer: ({ query }) => page(server.tickets[query.state === 'ended' ? 'ended'
     : 'open']) },
   'GET tickets/:id': { answer: ({ params }) => server.ticketDetails[params.id] ?? refuse(404, 'Ticket not found') },
+  'GET routers': { answer: () => page(server.routers) },
+  'GET routers/:id': { answer: ({ params }) => server.routerPages[params.id] ?? refuse(404, 'Router not found') },
   'POST tickets/:id/retry': { answer: ({ params }) => {
     const ticket = ticketOf(params.id)
     if (!ticket) return refuse(404, 'Ticket not found')

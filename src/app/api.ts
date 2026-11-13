@@ -9,6 +9,7 @@ import type { SourceStatusView } from './views/sources.ts'
 import type { DecisionListView, SearchView, ThreadDetailView, ThreadListView } from './views/threads.ts'
 import type { MemoryDetailView, MemoryListView, MemoryMergeRequest } from './views/memory.ts'
 import type { TicketListView } from './views/tickets.ts'
+import type { RouterDetailView, RouterListView } from './views/routers.ts'
 
 export const TICKET_FILTERS = ['open', 'person', 'working', 'idle', 'ended'] as const
 export const THREAD_FILTERS = ['subscribed', 'evaluating', 'recent', 'all'] as const
@@ -37,6 +38,8 @@ export interface Api {
   'POST memories/:id/forget': { response: { id: string; removed: boolean } }
   'GET tickets': { query?: Paged & { state?: TicketFilter }; response: TicketListView }
   'GET tickets/:id': { response: TicketPageView }
+  'GET routers': { response: RouterListView }
+  'GET routers/:id': { response: RouterDetailView }
   'POST tickets/:id/retry': { response: { retried: true } }
   'POST tickets/:id/stop': { response: { stopped: true } }
   'POST executor/pause': { body: { paused: boolean }; response: { paused: boolean } }
