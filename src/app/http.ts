@@ -29,6 +29,7 @@ import { decisionList, search, threadDetail, threadList } from './views/threads.
 import { memoryDetail, memoryList } from './views/memory.ts'
 import { MEMORY_KINDS, MEMORY_REF, type Memory } from '../memory/index.ts'
 import { executorLoad, ticketDetail, ticketList } from './views/tickets.ts'
+import { routerDetail, routerList } from './views/routers.ts'
 
 export interface HttpHost {
   readonly store: Store
@@ -218,6 +219,12 @@ function routes(runtime: HttpHost): Routes {
       return ticketList(views(runtime), state, offset, limit)
     },
     'GET tickets/:id': ({ params }) => ticketPage(runtime, params.id),
+    'GET routers': () => routerList(views(runtime), runtime.machine.stateDir),
+    'GET routers/:id': ({ params }) => {
+      const detail = routerDetail(views(runtime), params.id, runtime.machine.stateDir)
+      if (!detail) throw new RouteError(404, 'Router not found')
+      return detail
+    },
     'POST tickets/:id/retry': ({ params }) => { const id = ticket(params.id); runtime.engine.retryTicket(id); return { retried: true } },
     'POST tickets/:id/stop': ({ params }) => { const id = ticket(params.id); runtime.engine.stopTicket(id); return { stopped: true } },
     'POST executor/pause': async ({ body }) => runtime.settings.pause(z.object({ paused: z.boolean() }).parse(await body()).paused, 'panel'),

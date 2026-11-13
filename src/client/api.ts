@@ -134,6 +134,8 @@ export type Problem = ApiResponse<'GET overview'>['problems'][number]
 export type DroppedReply = SourceStatusRow['dropped'][number]
 export type SearchView = ApiResponse<'GET search'>
 export type TicketSummary = SearchView['tickets'][number]
+export type RouterRow = ApiResponse<'GET routers'>['items'][number]
+export type RouterPageView = ApiResponse<'GET routers/:id'>
 export type { TicketStage }
 export type HistoryView = ApiResponse<'GET policy/history'>
 export type PromptsView = ApiResponse<'GET prompts'>

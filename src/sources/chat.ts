@@ -41,8 +41,9 @@ export function chatMessage(event: SessionEvent, at = new Date().toISOString()):
  * The Trigger a person's message becomes: one Thread per Session (`chat:<session>`), the person as its actor, addressed
  * directly, and the Session as its Channel so an acknowledgement, an answer, and a result all land where it was written.
  * The id derives from the Session and the message, so re-reading a Session's history cannot ingest the same message twice.
+ * `workspace` is the directory the Session runs in, which names the router that serves that workspace.
  */
-export function chatTrigger(session: string, message: ChatMessage): Trigger {
+export function chatTrigger(session: string, message: ChatMessage, workspace?: string): Trigger {
   return {
     id: `${CHAT_SOURCE}:${session}:${message.id}`,
     source: CHAT_SOURCE,
@@ -53,7 +54,7 @@ export function chatTrigger(session: string, message: ChatMessage): Trigger {
     at: message.at,
     text: message.text,
     channel: { source: CHAT_SOURCE, thread: session, address: { session } },
-    meta: { session, message: message.id },
+    meta: { session, message: message.id, ...workspace ? { workspace } : {} },
   }
 }
 
@@ -117,7 +118,7 @@ export function apply(ctx: Context): void {
       const message = chatMessage(event)
       if (!message) return
       // A failed intake is the Engine's to report through the trigger's disposition; it must not escape into DSH's process.
-      void Promise.resolve(source.receive(chatTrigger(session.id, message))).catch(() => {})
+      void Promise.resolve(source.receive(chatTrigger(session.id, message, session.header.cwd))).catch(() => {})
     })
   }, 'chat: session listener')
 }
